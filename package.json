@@ -1,0 +1,25 @@
+{
+  "name": "model-probe",
+  "description": "Probe OpenAI-compatible gateways (LiteLLM, One API, New API, Ollama, ...) for models and metadata",
+  "type": "module",
+  "exports": "./index.ts",
+  "bin": {
+    "model-probe": "./cli.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "files": [
+    "index.ts",
+    "cli.ts",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/real-wudaoshi/model-probe.git"
+  },
+  "version": "0.1.0"
+}

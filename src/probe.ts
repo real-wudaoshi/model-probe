@@ -11,18 +11,45 @@ class ProbeRetryable extends Error {}
 // /v1/models while serving /models at the root; stock LiteLLM and many proxies
 // serve both; One API / New API only mount /v1. Try the base as given, then
 // the variant with a trailing /v1 added or removed.
+//
+// Public hosts that don't listen on :80 at all (e.g. api.llm.ustc.edu.cn)
+// make an explicit http:// URL hang until the timeout, so for non-local http
+// URLs we additionally try the https:// variants as a fallback.
+function isLocalHost(hostname: string): boolean {
+	const lower = hostname.toLowerCase();
+	return (
+		lower === "localhost" ||
+		lower.endsWith(".local") ||
+		lower.startsWith("127.") ||
+		lower.startsWith("0.0.0.0") ||
+		lower.startsWith("10.") ||
+		lower.startsWith("192.168.") ||
+		/^172\.(1[6-9]|2\d|3[01])\./.test(lower) ||
+		lower === "[::1]"
+	);
+}
+
 function probeBaseVariants(baseUrl: string): string[] {
 	const trimmed = baseUrl.replace(/\/+$/, "");
 	try {
 		const url = new URL(trimmed);
+		let pathVariant: string | null = null;
 		if (url.pathname.endsWith("/v1")) {
 			url.pathname = url.pathname.slice(0, -3) || "/";
-			return [trimmed, url.toString().replace(/\/+$/, "")];
-		}
-		if (url.pathname === "" || url.pathname === "/") {
+			pathVariant = url.toString().replace(/\/+$/, "");
+		} else if (url.pathname === "" || url.pathname === "/") {
 			url.pathname = "/v1";
-			return [trimmed, url.toString().replace(/\/+$/, "")];
+			pathVariant = url.toString().replace(/\/+$/, "");
 		}
+		const variants = [trimmed, ...(pathVariant ? [pathVariant] : [])];
+		if (url.protocol === "http:" && !isLocalHost(url.hostname)) {
+			for (const v of [...variants]) {
+				const secure = new URL(v);
+				secure.protocol = "https:";
+				variants.push(secure.toString().replace(/\/+$/, ""));
+			}
+		}
+		return dedupe(variants);
 	} catch {
 		// not a URL — probe as given
 	}

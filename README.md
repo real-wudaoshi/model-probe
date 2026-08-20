@@ -11,7 +11,8 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
 - **Model listing** — `GET {baseUrl}/models`, with automatic ±`/v1` adaptation:
   quirky gateways that hang or 404 on `/v1/models` (or serve their web console
   HTML there) are retried at the other variant, and the base URL that actually
-  answered is returned.
+  answered is returned. Non-local `http://` URLs additionally fall back to
+  `https://` (many public gateways don't listen on :80 at all).
 - **Inline metadata** — OpenRouter-style `context_length` / `architecture`,
   One API / New API `meta` fields and `supported_endpoint_types` carried by
   the `/models` list itself.

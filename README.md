@@ -2,7 +2,8 @@
 
 Probe OpenAI-compatible gateways for their model list and per-model metadata
 (context window, vision, reasoning, endpoint types). Works with LiteLLM,
-One API, New API, OpenRouter, Ollama, and generic OpenAI-compatible servers.
+One API, New API, OpenRouter, Google's native Gemini API, Ollama, and generic
+OpenAI-compatible servers.
 
 Runs on Node >= 22.18 (TypeScript type stripping, no build step).
 
@@ -12,7 +13,10 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
   quirky gateways that hang or 404 on `/v1/models` (or serve their web console
   HTML there) are retried at the other variant, and the base URL that actually
   answered is returned. Non-local `http://` URLs additionally fall back to
-  `https://` (many public gateways don't listen on :80 at all).
+  `https://` (many public gateways don't listen on :80 at all). Google's
+  native Gemini list shape (`{ models: [{ name: "models/...", inputTokenLimit }] }`)
+  is recognized too, and the API key is sent as both `Authorization: Bearer`
+  and `x-goog-api-key`.
 - **Inline metadata** — OpenRouter-style `context_length` / `architecture`,
   One API / New API `meta` fields and `supported_endpoint_types` carried by
   the `/models` list itself.

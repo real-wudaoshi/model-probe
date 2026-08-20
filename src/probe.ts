@@ -99,6 +99,9 @@ export async function probeModels(baseUrl: string, apiKey?: string): Promise<Pro
 	};
 	if (apiKey) {
 		headers.authorization = `Bearer ${apiKey}`;
+		// Google's native Gemini API authenticates with this header instead of
+		// Bearer; harmless on other servers.
+		headers["x-goog-api-key"] = apiKey;
 	}
 
 	const variants = probeBaseVariants(baseUrl);
@@ -116,13 +119,24 @@ export async function probeModels(baseUrl: string, apiKey?: string): Promise<Pro
 		}
 	}
 
-	const rawModels = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+	// OpenAI shape: { data: [...] } (or a bare array). Google's native Gemini
+	// API answers { models: [{ name: "models/gemini-2.5-pro", ... }] }.
+	const rawModels = Array.isArray(json)
+		? json
+		: Array.isArray(json?.data)
+			? json.data
+			: Array.isArray(json?.models)
+				? json.models
+				: [];
 	const infoById = new Map<string, ModelProbeInfo>();
 	const ids = dedupe(
 		rawModels
 			.map((item: any) => {
-				if (typeof item?.id !== "string" || !item.id.trim()) return "";
-				const id = item.id.trim();
+				// Gemini entries carry "name" (models/<id>) instead of "id".
+				const rawId =
+					typeof item?.id === "string" ? item.id : typeof item?.name === "string" ? item.name : "";
+				if (!rawId.trim()) return "";
+				const id = rawId.trim().replace(/^models\//, "");
 				// Some /models lists carry metadata inline (OpenRouter, OpenModels,
 				// Epithre, ...). Capture it so callers can show details without an
 				// extra round-trip per model.
@@ -193,7 +207,7 @@ function parseModelListItem(item: any): ModelProbeInfo | undefined {
 	if (!item || typeof item !== "object") return undefined;
 	const info: ModelProbeInfo = {};
 
-	const contextWindow = firstFiniteNumber(item, "context_length", "context_window", "max_input_tokens");
+	const contextWindow = firstFiniteNumber(item, "context_length", "context_window", "max_input_tokens", "inputTokenLimit");
 	if (contextWindow !== undefined) info.contextWindow = contextWindow;
 	if (typeof item.reasoning === "boolean") info.reasoning = item.reasoning;
 
@@ -226,7 +240,8 @@ function parseOpenAIModelDetail(json: any): ModelProbeInfo | undefined {
 	if (!json || typeof json !== "object") return undefined;
 	const info: ModelProbeInfo = {};
 
-	const contextWindow = firstFiniteNumber(json, "context_window");
+	// inputTokenLimit: Google's native Gemini per-model detail.
+	const contextWindow = firstFiniteNumber(json, "context_window", "inputTokenLimit");
 	if (contextWindow !== undefined) info.contextWindow = contextWindow;
 
 	const capabilities = json.capabilities;
@@ -468,7 +483,10 @@ export async function enrichOpenAIModelDetails(
 	ids: string[],
 ): Promise<Map<string, ModelProbeInfo>> {
 	const headers: Record<string, string> = { accept: "application/json", "accept-encoding": "identity" };
-	if (apiKey) headers.authorization = `Bearer ${apiKey}`;
+	if (apiKey) {
+		headers.authorization = `Bearer ${apiKey}`;
+		headers["x-goog-api-key"] = apiKey;
+	}
 
 	const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
 	const out = new Map<string, ModelProbeInfo>();

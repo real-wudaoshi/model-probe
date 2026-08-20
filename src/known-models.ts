@@ -1,111 +1,116 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ModelProbeInfo } from "./types.ts";
 
-// Merge list-level metadata with per-model detail fetches. Best effort — when a
-// server exposes nothing, the wizard falls back to its defaults per model.
-// Conservative context-window fallback for well-known model ids. Used when a
-// gateway exposes no metadata at all (stock One API / New API, bare proxies)
-// Built-in local rules that classify well-known model ids and preset their
-// context window, max output tokens, vision, and reasoning support. Used when
-// a gateway exposes no metadata (stock One API / New API, bare proxies,
-// manually added models). Values are conservative/stable; unknown ids are left
-// unset. Entry order matters — more specific patterns (e.g. claude-sonnet-4-5)
-// must come before their prefix (claude-sonnet-4).
-type KnownModelRule = {
-	pattern: RegExp;
-	contextWindow: number;
+// Known-model rules classify well-known model ids and preset their context
+// window, vision, and reasoning support. Used when a gateway exposes no
+// metadata (stock One API / New API, bare proxies, manually added models).
+//
+// Rules are DATA, loaded at runtime (rules.json shipped with the package),
+// so users can extend them:
+//   - a JSON file at ~/.model-probe-rules.json, or the path in the
+//     MODEL_PROBE_RULES env var, is merged in (user rules win on conflicts)
+//   - library users can call registerKnownModelRules()
+//
+// Entry order matters — more specific patterns (e.g. claude-sonnet-4-5) must
+// come before their prefix (claude-sonnet-4). Precedence: programmatic rules,
+// then the user file, then the built-in table.
+export type KnownModelRule = {
+	/** RegExp source, e.g. "^gpt-5". */
+	pattern: string;
+	/** RegExp flags, default "i". */
+	flags?: string;
+	contextWindow?: number;
 	vision?: boolean;
 	reasoning?: boolean;
 };
 
-const KNOWN_MODEL_RULES: KnownModelRule[] = [
-	// ===== OpenAI =====
-	{ pattern: /^gpt-5-mini/i, contextWindow: 128000, vision: true, reasoning: true },
-	{ pattern: /^gpt-5-nano/i, contextWindow: 128000, reasoning: true },
-	{ pattern: /^gpt-5/i, contextWindow: 272000, vision: true, reasoning: true },
-	{ pattern: /^gpt-4\.1/i, contextWindow: 1047576, vision: true },
-	{ pattern: /^gpt-4o-mini/i, contextWindow: 128000, vision: true },
-	{ pattern: /^gpt-4o/i, contextWindow: 128000, vision: true },
-	{ pattern: /^gpt-4-turbo/i, contextWindow: 128000, vision: true },
-	{ pattern: /^gpt-4-32k/i, contextWindow: 32768 },
-	{ pattern: /^gpt-4/i, contextWindow: 8192 },
-	{ pattern: /^gpt-3\.5-turbo/i, contextWindow: 16385 },
-	{ pattern: /^o4-mini/i, contextWindow: 200000, vision: true, reasoning: true },
-	{ pattern: /^o4/i, contextWindow: 200000, vision: true, reasoning: true },
-	{ pattern: /^o3-mini/i, contextWindow: 200000, reasoning: true },
-	{ pattern: /^o3/i, contextWindow: 200000, reasoning: true },
-	{ pattern: /^o1-preview/i, contextWindow: 200000, reasoning: true },
-	{ pattern: /^o1-mini/i, contextWindow: 128000, reasoning: true },
-	{ pattern: /^o1/i, contextWindow: 200000, reasoning: true },
-	{ pattern: /^gpt-oss/i, contextWindow: 128000, vision: true, reasoning: true },
-	// ===== Anthropic =====
-	{ pattern: /^claude-(opus|sonnet|haiku)-4-6/i, contextWindow: 200000, vision: true, reasoning: true },
-	{ pattern: /^claude-(opus|sonnet|haiku)-4-5/i, contextWindow: 1000000, vision: true, reasoning: true },
-	{ pattern: /^claude-(opus|sonnet|haiku)-4/i, contextWindow: 200000, vision: true, reasoning: true },
-	{ pattern: /^claude-3-7-sonnet/i, contextWindow: 200000, vision: true, reasoning: true },
-	{ pattern: /^claude-3-5-sonnet/i, contextWindow: 200000, vision: true },
-	{ pattern: /^claude-3-5-haiku/i, contextWindow: 200000, vision: true },
-	{ pattern: /^claude-3/i, contextWindow: 200000, vision: true },
-	// ===== DeepSeek =====
-	{ pattern: /^deepseek-v4/i, contextWindow: 1000000, vision: false, reasoning: true },
-	{ pattern: /^deepseek-(chat|reasoner|v3|r1)/i, contextWindow: 128000, vision: false, reasoning: true },
-	{ pattern: /^deepseek-coder/i, contextWindow: 16384 },
-	// ===== Qwen =====
-	{ pattern: /^qwen[0-9.]*-non-thinking/i, contextWindow: 262144, reasoning: false },
-	{ pattern: /^qwen[^ ]*(thinking|reasoner)/i, contextWindow: 262144, reasoning: true },
-	{ pattern: /^qwen2\.5-turbo/i, contextWindow: 1000000 },
-	{ pattern: /^qwen[^ ]*-vl/i, contextWindow: 131072, vision: true },
-	{ pattern: /^qwen-long/i, contextWindow: 10000000 },
-	{ pattern: /^qwen-max/i, contextWindow: 131072 },
-	{ pattern: /^qwen-plus/i, contextWindow: 131072 },
-	{ pattern: /^qwen-turbo/i, contextWindow: 131072 },
-	{ pattern: /^qwen2\.5-coder/i, contextWindow: 131072 },
-	{ pattern: /^qwen2\.5/i, contextWindow: 131072 },
-	{ pattern: /^qwen2/i, contextWindow: 32768 },
-	{ pattern: /^qwen3-coder/i, contextWindow: 131072, reasoning: true },
-	{ pattern: /^qwen3\.(5|6|8)/i, contextWindow: 262144, reasoning: true },
-	{ pattern: /^qwen-chat/i, contextWindow: 262000 },
-	{ pattern: /^qwen3/i, contextWindow: 131072, reasoning: true },
-	{ pattern: /^qwen1\.5/i, contextWindow: 32768 },
-	{ pattern: /^qwen/i, contextWindow: 131072 },
-	// ===== Kimi (Moonshot) =====
-	{ pattern: /^k3$/i, contextWindow: 1000000, reasoning: true },
-	{ pattern: /^moonshotai\/kimi-k2/i, contextWindow: 262144, reasoning: true },
-	{ pattern: /^kimi-k2/i, contextWindow: 262144, reasoning: true },
-	{ pattern: /^kimi-k1\.5/i, contextWindow: 131072, reasoning: true },
-	{ pattern: /^moonshot-v1-128k/i, contextWindow: 131072 },
-	{ pattern: /^moonshot-v1-32k/i, contextWindow: 32768 },
-	{ pattern: /^moonshot-v1-8k/i, contextWindow: 8192 },
-	{ pattern: /^moonshot-v1/i, contextWindow: 131072 },
-	{ pattern: /^kimi-latest/i, contextWindow: 131072 },
-	{ pattern: /^kimi/i, contextWindow: 131072 },
-	// ===== GLM (Zhipu) =====
-	{ pattern: /^glm-5/i, contextWindow: 128000, reasoning: true },
-	{ pattern: /^glm-z1/i, contextWindow: 128000, reasoning: true },
-	{ pattern: /^glm-4\.5/i, contextWindow: 128000, reasoning: true },
-	{ pattern: /^glm-4v/i, contextWindow: 8192, vision: true },
-	{ pattern: /^glm-4-long/i, contextWindow: 1024000 },
-	{ pattern: /^glm-4/i, contextWindow: 128000 },
-	{ pattern: /^glm/i, contextWindow: 128000 },
-	// ===== Google / Meta / Mistral =====
-	{ pattern: /^gemini-(1\.5|2\.0|2\.5|3)/i, contextWindow: 1000000, vision: true },
-	{ pattern: /^llama(3|4)/i, contextWindow: 131072 },
-	{ pattern: /^mistral-(large|small|medium)/i, contextWindow: 128000 },
-];
+type CompiledRule = {
+	regex: RegExp;
+	contextWindow?: number;
+	vision?: boolean;
+	reasoning?: boolean;
+};
 
-// Classify a model id against the local rules and return the preset metadata.
-function matchKnownModelRule(modelId: string): ModelProbeInfo | undefined {
-	for (const rule of KNOWN_MODEL_RULES) {
-		if (rule.pattern.test(modelId)) {
-			const info: ModelProbeInfo = { contextWindow: rule.contextWindow };
-			if (rule.vision !== undefined) info.vision = rule.vision;
-			if (rule.reasoning !== undefined) info.reasoning = rule.reasoning;
-			return info;
-		}
-	}
-	return undefined;
+const BUILTIN_RULES_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "rules.json");
+
+const programmaticRules: KnownModelRule[] = [];
+let cache: CompiledRule[] | null = null;
+
+// Register extra rules from library code. They take precedence over both the
+// user file and the built-in table.
+export function registerKnownModelRules(rules: KnownModelRule[]): void {
+	programmaticRules.push(...rules);
+	cache = null;
 }
 
-// Fill any fields the probe couldn't determine from the built-in model rules.
+// Drop the compiled cache so the next lookup re-reads the rule files.
+export function reloadKnownModelRules(): void {
+	cache = null;
+}
+
+function compileRules(raw: unknown, source: string): CompiledRule[] {
+	if (!Array.isArray(raw)) return [];
+	const out: CompiledRule[] = [];
+	for (const entry of raw) {
+		if (!entry || typeof entry !== "object" || typeof entry.pattern !== "string") continue;
+		try {
+			out.push({
+				regex: new RegExp(entry.pattern, typeof entry.flags === "string" ? entry.flags : "i"),
+				contextWindow: typeof entry.contextWindow === "number" ? entry.contextWindow : undefined,
+				vision: typeof entry.vision === "boolean" ? entry.vision : undefined,
+				reasoning: typeof entry.reasoning === "boolean" ? entry.reasoning : undefined,
+			});
+		} catch {
+			console.warn(`model-probe: skipping invalid rule in ${source}: ${entry.pattern}`);
+		}
+	}
+	return out;
+}
+
+function readRulesFile(path: string): CompiledRule[] {
+	try {
+		return compileRules(JSON.parse(readFileSync(path, "utf8")), path);
+	} catch {
+		return [];
+	}
+}
+
+function userRulesPath(): string {
+	return process.env.MODEL_PROBE_RULES || join(homedir(), ".model-probe-rules.json");
+}
+
+function loadRules(): CompiledRule[] {
+	if (cache) return cache;
+	const rules = [...compileRules(programmaticRules, "registerKnownModelRules")];
+	const userPath = userRulesPath();
+	if (existsSync(userPath)) rules.push(...readRulesFile(userPath));
+	rules.push(...readRulesFile(BUILTIN_RULES_PATH));
+	cache = rules;
+	return rules;
+}
+
+// Classify a model id against the rules and return the preset metadata.
+// Matching is per-field: the first matching rule that defines a field wins,
+// later rules fill fields it didn't define — so a user rule that only sets
+// contextWindow still inherits vision/reasoning from the built-in table.
+function matchKnownModelRule(modelId: string): ModelProbeInfo | undefined {
+	const info: ModelProbeInfo = {};
+	let matched = false;
+	for (const rule of loadRules()) {
+		if (!rule.regex.test(modelId)) continue;
+		matched = true;
+		if (info.contextWindow === undefined && rule.contextWindow !== undefined) info.contextWindow = rule.contextWindow;
+		if (info.vision === undefined && rule.vision !== undefined) info.vision = rule.vision;
+		if (info.reasoning === undefined && rule.reasoning !== undefined) info.reasoning = rule.reasoning;
+		if (info.contextWindow !== undefined && info.vision !== undefined && info.reasoning !== undefined) break;
+	}
+	return matched ? info : undefined;
+}
+
+// Fill any fields the probe couldn't determine from the known-model rules.
 // Real detected values always win; the rules only fill gaps. inferredFields
 // records exactly which fields came from the rules.
 export function applyKnownModelFallback(modelId: string, info: ModelProbeInfo | undefined): ModelProbeInfo | undefined {

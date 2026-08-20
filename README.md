@@ -23,6 +23,7 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
 - **Local rules** — a built-in table of well-known models (OpenAI, Anthropic,
   DeepSeek, Qwen, Kimi, GLM, Gemini, ...) fills any fields the gateway didn't
   report. Fields filled this way are tagged (`inferred` / `inferredFields`).
+  The table is data (`rules.json`), not code — see [Custom rules](#custom-rules).
 
 All fetches time out after 4s and run with bounded concurrency; everything
 beyond the model list itself is best-effort.
@@ -80,6 +81,7 @@ const { ids, infoById, baseUrl } = await probeModels("http://localhost:4000");
 - `fetchPerModelInfo(baseUrl, ids, { apiKey?, ollama? })`
 - `finalizeModelInfo(ids, ...maps)` — merge metadata maps + local rules
 - `applyKnownModelFallback(id, info?)` — fill gaps from the local rules
+- `registerKnownModelRules(rules)` / `reloadKnownModelRules()` — extend the rules
 - `describeProbeInfo(info)` / `probeInfoSummary(info)` — formatting helpers
 - `enrichLiteLLMModelInfo` / `enrichLiteLLMModelGroupInfo` /
   `enrichPublicModelInfo` / `enrichOpenAIModelDetails` /
@@ -98,6 +100,35 @@ type ModelProbeInfo = {
 	inferred?: boolean;       // filled from local rules, not the gateway
 	inferredFields?: Array<"contextWindow" | "vision" | "reasoning">;
 };
+```
+
+## Custom rules
+
+The known-model table ships as [`rules.json`](rules.json) and is read at
+runtime. Each entry is a regex matched against the model id:
+
+```json
+[
+	{ "pattern": "^my-model", "contextWindow": 65536, "vision": true, "reasoning": false }
+]
+```
+
+- `pattern` — RegExp source; `flags` optional, defaults to `"i"`.
+- `contextWindow` / `vision` / `reasoning` — all optional; omit what you don't know.
+
+To add or override rules, drop a JSON file with the same shape at
+`~/.model-probe-rules.json`, or point the `MODEL_PROBE_RULES` env var at any
+path. Matching is per-field and first-match-wins: your rules are consulted
+before the built-in table, and fields your rule doesn't define still fall
+through to built-in rules (e.g. override just `contextWindow` for `gpt-5-mini`
+and it keeps the built-in `vision`/`reasoning`).
+
+Library users can also register rules in code:
+
+```ts
+import { registerKnownModelRules } from "model-probe";
+
+registerKnownModelRules([{ pattern: "^my-model", contextWindow: 65536 }]);
 ```
 
 ## License

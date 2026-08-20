@@ -1,4 +1,5 @@
-export { applyKnownModelFallback } from "./src/known-models.ts";
+export { applyKnownModelFallback, registerKnownModelRules, reloadKnownModelRules } from "./src/known-models.ts";
+export type { KnownModelRule } from "./src/known-models.ts";
 export {
 	describeProbeInfo,
 	enrichLiteLLMModelGroupInfo,

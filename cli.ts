@@ -67,8 +67,8 @@ try {
 	console.log(`Base URL: ${result.baseUrl}`);
 	console.log(`Models:   ${result.ids.length}`);
 	if (developerRole) {
-		const support = result.supportsDeveloperRole;
-		console.log(`Developer role: ${support === undefined ? "unknown (probe inconclusive)" : support ? "supported" : "NOT supported"}`);
+		const src = result.developerRoleSource === "default" ? " (default — probe inconclusive)" : "";
+		console.log(`Developer role: ${result.supportsDeveloperRole ? "supported" : "NOT supported"}${src}`);
 	}
 	let detected = 0;
 	let inferred = 0;
@@ -78,7 +78,7 @@ try {
 		else if (info?.inferred) inferred++;
 		console.log(`  ${id}${describeProbeInfo(info) ? ` — ${describeProbeInfo(info)}` : ""}`);
 	}
-	console.log(`\nMetadata: ${detected} detected, ${inferred} from local rules, ${result.ids.length - detected - inferred} unknown`);
+	console.log(`\nMetadata: ${detected} detected, ${inferred} from local rules, ${result.ids.length - detected - inferred} from defaults`);
 } catch (error) {
 	console.error(`Probe failed: ${error instanceof Error ? error.message : String(error)}`);
 	process.exit(1);

@@ -29,10 +29,15 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
   DeepSeek, Qwen, Kimi, GLM, Gemini, ...) fills any fields the gateway didn't
   report. Fields filled this way are tagged (`inferred` / `inferredFields`).
   The table is data (`rules.json`), not code — see [Custom rules](#custom-rules).
+- **Defaults** — fields neither the gateway nor the local rules answered are
+  filled from `MODEL_INFO_DEFAULTS` (`vision: false`, `reasoning: true`) and
+  tagged in `defaultedFields`. Priority: detected > local rule > default.
+  `describeProbeInfo` only renders values that differ from the defaults.
 - **Developer-role probe** (opt-in) — one tiny chat completion with a
   `developer`-role message tells you whether the gateway accepts the OpenAI
   developer role. Gateways that don't (Kimi's subscription endpoint, some
   One API forks) reject it with a 400, and clients must fall back to `system`.
+  An inconclusive probe defaults to `false` (`developerRoleSource: "default"`).
 
 All fetches time out after 4s and run with bounded concurrency; everything
 beyond the model list itself is best-effort.
@@ -90,12 +95,14 @@ const { ids, infoById, baseUrl } = await probeModels("http://localhost:4000");
 ### API
 
 - `probeModels(baseUrl, apiKey?)` → `{ ids, infoById, baseUrl }`
-- `detectModels(baseUrl, options?)` → `ProbeResult & { models, supportsDeveloperRole? }`
+- `detectModels(baseUrl, options?)` → `ProbeResult & { models, supportsDeveloperRole?, developerRoleSource? }`
 - `probeDeveloperRole(baseUrl, apiKey?, modelId)` → `true | false | undefined`
 - `fetchGatewayWideInfo(baseUrl, { apiKey?, profile?, ollama? })`
 - `fetchPerModelInfo(baseUrl, ids, { apiKey?, ollama? })`
-- `finalizeModelInfo(ids, ...maps)` — merge metadata maps + local rules
+- `finalizeModelInfo(ids, ...maps)` — merge metadata maps + local rules + defaults
+- `resolveModelInfo(id, info?)` — local rules + defaults for one model
 - `applyKnownModelFallback(id, info?)` — fill gaps from the local rules
+- `applyModelDefaults(info?)` / `MODEL_INFO_DEFAULTS` — the default tier
 - `registerKnownModelRules(rules)` / `reloadKnownModelRules()` — extend the rules
 - `describeProbeInfo(info)` / `probeInfoSummary(info)` — formatting helpers
 - `enrichLiteLLMModelInfo` / `enrichLiteLLMModelGroupInfo` /
@@ -112,8 +119,9 @@ type ModelProbeInfo = {
 	alwaysThinking?: boolean;
 	effortOptions?: string[];
 	endpointTypes?: string[]; // New API / One API supported_endpoint_types
-	inferred?: boolean;       // filled from local rules, not the gateway
+	inferred?: boolean;       // at least one field came from the local rules
 	inferredFields?: Array<"contextWindow" | "vision" | "reasoning">;
+	defaultedFields?: Array<"vision" | "reasoning">; // filled from MODEL_INFO_DEFAULTS
 };
 ```
 

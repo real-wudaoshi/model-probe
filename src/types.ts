@@ -1,4 +1,9 @@
 // Best-effort model metadata detected while probing a gateway.
+//
+// Every field has one of three sources, highest priority first:
+//   1. detected  — real data from the gateway (no tag)
+//   2. local rule — filled from the known-model table (listed in inferredFields)
+//   3. default   — filled from MODEL_INFO_DEFAULTS (listed in defaultedFields)
 export type ModelProbeInfo = {
 	contextWindow?: number;
 	vision?: boolean;
@@ -6,8 +11,9 @@ export type ModelProbeInfo = {
 	alwaysThinking?: boolean; // reasoning exists but cannot be turned off
 	effortOptions?: string[]; // provider reasoning-effort names (none/minimal/low/.../max)
 	endpointTypes?: string[]; // New API / One API: supported_endpoint_types (chat, embeddings, ...)
-	inferred?: boolean; // filled from the built-in model table, not the gateway
-	inferredFields?: Array<"contextWindow" | "vision" | "reasoning">; // which fields were inferred
+	inferred?: boolean; // at least one field was filled from the local rules
+	inferredFields?: Array<"contextWindow" | "vision" | "reasoning">; // which fields came from the local rules
+	defaultedFields?: Array<"vision" | "reasoning">; // which fields came from MODEL_INFO_DEFAULTS
 };
 
 export type ProbeResult = {

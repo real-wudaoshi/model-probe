@@ -1,6 +1,7 @@
 import { applyKnownModelFallback } from "./known-models.ts";
 import { probeDeveloperRole } from "./developer-role.ts";
 import {
+	applyModelDefaults,
 	enrichLiteLLMModelGroupInfo,
 	enrichLiteLLMModelInfo,
 	enrichOllamaModelDetails,
@@ -26,8 +27,10 @@ export interface DetectOptions {
 export interface DetectResult extends ProbeResult {
 	/** Final per-model metadata: inline list fields + gateway-wide + per-model + local rules. */
 	models: Map<string, ModelProbeInfo>;
-	/** Developer-role support, when requested via DetectOptions.developerRole. */
+	/** Developer-role support (probed value, or the default false), when requested via DetectOptions.developerRole. */
 	supportsDeveloperRole?: boolean;
+	/** Where supportsDeveloperRole came from: a real probe, or the default. */
+	developerRoleSource?: "detected" | "default";
 }
 
 // Gateway-wide metadata sources: each answers for EVERY model in a single
@@ -82,8 +85,15 @@ export async function fetchPerModelInfo(
 	return enrichOpenAIModelDetails(baseUrl, options.apiKey, ids);
 }
 
-// Merge metadata maps for `ids` (later maps win) and fill remaining gaps from
-// the built-in known-model rules.
+// Resolve the final metadata for one model: detected values win, gaps are
+// filled from the known-model rules, then from MODEL_INFO_DEFAULTS. The
+// source of each filled field is tagged (inferredFields / defaultedFields).
+export function resolveModelInfo(modelId: string, info?: ModelProbeInfo): ModelProbeInfo {
+	return applyModelDefaults(applyKnownModelFallback(modelId, info));
+}
+
+// Merge metadata maps for `ids` (later maps win) and resolve each id through
+// the local rules + defaults.
 export function finalizeModelInfo(ids: string[], ...maps: Array<Map<string, ModelProbeInfo>>): Map<string, ModelProbeInfo> {
 	const merged = new Map<string, ModelProbeInfo>();
 	for (const map of maps) {
@@ -92,8 +102,7 @@ export function finalizeModelInfo(ids: string[], ...maps: Array<Map<string, Mode
 		}
 	}
 	for (const id of ids) {
-		const filled = applyKnownModelFallback(id, merged.get(id));
-		if (filled) merged.set(id, filled);
+		merged.set(id, resolveModelInfo(id, merged.get(id)));
 	}
 	return merged;
 }
@@ -124,8 +133,12 @@ export async function detectModels(baseUrl: string, options: DetectOptions = {})
 			: finalizeModelInfo(probed.ids, probed.infoById, gatewayWide, details);
 
 	const result: DetectResult = { ...probed, models };
-	if (options.developerRole && probed.ids.length > 0) {
-		result.supportsDeveloperRole = await probeDeveloperRole(probed.baseUrl, options.apiKey, probed.ids[0]);
+	if (options.developerRole) {
+		const probedRole = probed.ids.length > 0 ? await probeDeveloperRole(probed.baseUrl, options.apiKey, probed.ids[0]) : undefined;
+		// Inconclusive probes default to false: sending "system" instead of
+		// "developer" is accepted everywhere, the reverse is not.
+		result.supportsDeveloperRole = probedRole ?? false;
+		result.developerRoleSource = probedRole === undefined ? "default" : "detected";
 	}
 	return result;
 }

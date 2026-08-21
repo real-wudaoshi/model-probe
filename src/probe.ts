@@ -150,13 +150,38 @@ export async function probeModels(baseUrl: string, apiKey?: string): Promise<Pro
 	return { ids, infoById, baseUrl: resolvedBaseUrl };
 }
 
-// Human-readable list of the metadata fields actually present in a probe result.
+// Field defaults applied when neither the gateway nor the local rules say
+// anything: reasoning on (most current models think), vision off (image input
+// is opt-in). contextWindow has no default. Developer-role support is a
+// gateway-level probe and defaults to false as well (see developer-role.ts).
+export const MODEL_INFO_DEFAULTS = { vision: false, reasoning: true } as const;
+
+// Fill still-unknown fields from MODEL_INFO_DEFAULTS, tagging them in
+// defaultedFields. Detected and local-rule values always win.
+export function applyModelDefaults(info: ModelProbeInfo | undefined): ModelProbeInfo {
+	const out: ModelProbeInfo = { ...(info ?? {}) };
+	const defaulted: Array<"vision" | "reasoning"> = [...(info?.defaultedFields ?? [])];
+	if (out.vision === undefined) {
+		out.vision = MODEL_INFO_DEFAULTS.vision;
+		defaulted.push("vision");
+	}
+	if (out.reasoning === undefined) {
+		out.reasoning = MODEL_INFO_DEFAULTS.reasoning;
+		defaulted.push("reasoning");
+	}
+	if (defaulted.length > 0) out.defaultedFields = defaulted;
+	return out;
+}
+
+// Human-readable list of the metadata fields actually present in a probe
+// result. Default-filled fields don't count — they carry no information.
 export function probeInfoSummary(info: ModelProbeInfo | undefined): string[] {
 	if (!info) return [];
+	const defaulted = new Set(info.defaultedFields ?? []);
 	const parts: string[] = [];
 	if (info.contextWindow !== undefined) parts.push("context");
-	if (info.reasoning !== undefined) parts.push("reasoning");
-	if (info.vision !== undefined) parts.push("vision");
+	if (info.reasoning !== undefined && !defaulted.has("reasoning")) parts.push("reasoning");
+	if (info.vision !== undefined && !defaulted.has("vision")) parts.push("vision");
 	return parts;
 }
 
@@ -173,9 +198,12 @@ export function describeProbeInfo(info: ModelProbeInfo | undefined): string | un
 	const tag = (field: "contextWindow" | "vision" | "reasoning") => (inferred.has(field) ? " [local rules]" : "");
 	const parts: string[] = [];
 	if (info.contextWindow !== undefined) parts.push(`ctx ${info.contextWindow}${tag("contextWindow")}`);
-	if (info.vision !== undefined) parts.push(`${info.vision ? "vision" : "text-only"}${tag("vision")}`);
-	if (info.reasoning === true) parts.push(`${info.alwaysThinking ? "reasoning (always on)" : "reasoning"}${tag("reasoning")}`);
-	else if (info.reasoning === false) parts.push(`no reasoning${tag("reasoning")}`);
+	// Only values that differ from the defaults (vision: false, reasoning:
+	// true) are worth showing — a model with default values gets no tag at
+	// all, even if the default was really detected (e.g. probed "no vision").
+	if (info.vision === true) parts.push(`vision${tag("vision")}`);
+	if (info.reasoning === false) parts.push(`no reasoning${tag("reasoning")}`);
+	else if (info.reasoning === true && info.alwaysThinking) parts.push(`reasoning (always on)${tag("reasoning")}`);
 	if (info.endpointTypes && info.endpointTypes.length > 0) parts.push(info.endpointTypes.join("/"));
 	return parts.length > 0 ? parts.join(" • ") : undefined;
 }

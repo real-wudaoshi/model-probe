@@ -1,5 +1,6 @@
 import { applyKnownModelFallback } from "./known-models.ts";
 import { probeDeveloperRole } from "./developer-role.ts";
+import { fetchModelsDevInfoForBaseUrl } from "./modelsdev.ts";
 import {
 	applyModelDefaults,
 	enrichLiteLLMModelGroupInfo,
@@ -85,16 +86,44 @@ export async function fetchPerModelInfo(
 	return enrichOpenAIModelDetails(baseUrl, options.apiKey, ids);
 }
 
-// Resolve the final metadata for one model: detected values win, gaps are
-// filled from the known-model rules, then from MODEL_INFO_DEFAULTS. The
-// source of each filled field is tagged (inferredFields / defaultedFields).
-export function resolveModelInfo(modelId: string, info?: ModelProbeInfo): ModelProbeInfo {
-	return applyModelDefaults(applyKnownModelFallback(modelId, info));
+// Fill still-unknown fields from the models.dev catalog (matched by base URL
+// upstream), tagging them in modelsDevFields. Runs after the local rules and
+// before the defaults.
+function applyModelsDevFallback(info: ModelProbeInfo | undefined, modelsDev: ModelProbeInfo | undefined): ModelProbeInfo | undefined {
+	if (!modelsDev) return info;
+	const out: ModelProbeInfo = { ...(info ?? {}) };
+	const tagged: Array<"contextWindow" | "vision" | "reasoning"> = [...(info?.modelsDevFields ?? [])];
+	for (const field of ["contextWindow", "vision", "reasoning"] as const) {
+		if (out[field] === undefined && modelsDev[field] !== undefined) {
+			out[field] = modelsDev[field];
+			tagged.push(field);
+		}
+	}
+	// effortOptions isn't a display tag, just carry it over.
+	if (out.effortOptions === undefined && modelsDev.effortOptions !== undefined) out.effortOptions = modelsDev.effortOptions;
+	if (tagged.length > 0) out.modelsDevFields = tagged;
+	return out;
+}
+
+// Resolve the final metadata for one model: detected values win, then the
+// local rules, then the models.dev catalog, then MODEL_INFO_DEFAULTS. The
+// source of each filled field is tagged (inferredFields / modelsDevFields /
+// defaultedFields).
+export function resolveModelInfo(
+	modelId: string,
+	info?: ModelProbeInfo,
+	modelsDev?: Map<string, ModelProbeInfo>,
+): ModelProbeInfo {
+	return applyModelDefaults(applyModelsDevFallback(applyKnownModelFallback(modelId, info), modelsDev?.get(modelId)));
 }
 
 // Merge metadata maps for `ids` (later maps win) and resolve each id through
-// the local rules + defaults.
-export function finalizeModelInfo(ids: string[], ...maps: Array<Map<string, ModelProbeInfo>>): Map<string, ModelProbeInfo> {
+// the local rules + models.dev + defaults.
+export function finalizeModelInfo(
+	ids: string[],
+	maps: Array<Map<string, ModelProbeInfo>>,
+	options: { modelsDev?: Map<string, ModelProbeInfo> } = {},
+): Map<string, ModelProbeInfo> {
 	const merged = new Map<string, ModelProbeInfo>();
 	for (const map of maps) {
 		for (const [id, info] of map) {
@@ -102,7 +131,7 @@ export function finalizeModelInfo(ids: string[], ...maps: Array<Map<string, Mode
 		}
 	}
 	for (const id of ids) {
-		merged.set(id, resolveModelInfo(id, merged.get(id)));
+		merged.set(id, resolveModelInfo(id, merged.get(id), options.modelsDev));
 	}
 	return merged;
 }
@@ -127,10 +156,17 @@ export async function detectModels(baseUrl: string, options: DetectOptions = {})
 		details = await fetchPerModelInfo(probed.baseUrl, probed.ids, { apiKey: options.apiKey });
 	}
 
+	// models.dev catalog, matched to the probed base URL. Fetched like a
+	// gateway-wide source but applied BELOW the local rules at finalize time.
+	let modelsDev = new Map<string, ModelProbeInfo>();
+	if (profile.modelsDev) {
+		modelsDev = await fetchModelsDevInfoForBaseUrl(probed.baseUrl);
+	}
+
 	const models =
 		options.knownModelFallback === false
-			? finalizeModelInfo([], probed.infoById, gatewayWide, details)
-			: finalizeModelInfo(probed.ids, probed.infoById, gatewayWide, details);
+			? finalizeModelInfo([], [probed.infoById, gatewayWide, details])
+			: finalizeModelInfo(probed.ids, [probed.infoById, gatewayWide, details], { modelsDev });
 
 	const result: DetectResult = { ...probed, models };
 	if (options.developerRole) {

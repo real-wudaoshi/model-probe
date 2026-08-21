@@ -13,6 +13,12 @@ export {
 	probeModels,
 } from "./src/probe.ts";
 export { probeDeveloperRole } from "./src/developer-role.ts";
+export {
+	fetchModelsDevInfoForBaseUrl,
+	fetchModelsDevModels,
+	fetchModelsDevProviders,
+} from "./src/modelsdev.ts";
+export type { ModelsDevProvider } from "./src/modelsdev.ts";
 export { detectModels, fetchGatewayWideInfo, fetchPerModelInfo, finalizeModelInfo, resolveModelInfo } from "./src/detect.ts";
 export type { DetectOptions, DetectResult } from "./src/detect.ts";
 export { FULL_PROFILE, PROBE_CONCURRENCY, PROBE_TIMEOUT_MS } from "./src/types.ts";

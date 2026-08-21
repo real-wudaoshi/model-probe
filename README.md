@@ -29,9 +29,16 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
   DeepSeek, Qwen, Kimi, GLM, Gemini, ...) fills any fields the gateway didn't
   report. Fields filled this way are tagged (`inferred` / `inferredFields`).
   The table is data (`rules.json`), not code — see [Custom rules](#custom-rules).
-- **Defaults** — fields neither the gateway nor the local rules answered are
-  filled from `MODEL_INFO_DEFAULTS` (`vision: false`, `reasoning: true`) and
-  tagged in `defaultedFields`. Priority: detected > local rule > default.
+- **models.dev** — the [models.dev](https://models.dev) catalog fills any
+  fields still unset after the local rules, tagged in `modelsDevFields`.
+  Fetched lazily per gateway base URL (matched against the catalog's provider
+  list), cached for the session, and never blocks a probe: when models.dev is
+  unreachable the tier is silently skipped. `https://models.dev/api.json` is
+  tried first, with the GitHub repo (via jsDelivr) as mirror fallback.
+  Disable with `profile: { modelsDev: false }`.
+- **Defaults** — fields nothing else answered are filled from
+  `MODEL_INFO_DEFAULTS` (`vision: false`, `reasoning: true`) and tagged in
+  `defaultedFields`. Priority: detected > local rule > models.dev > default.
   `describeProbeInfo` only renders values that differ from the defaults.
 - **Developer-role probe** (opt-in) — one tiny chat completion with a
   `developer`-role message tells you whether the gateway accepts the OpenAI
@@ -99,10 +106,12 @@ const { ids, infoById, baseUrl } = await probeModels("http://localhost:4000");
 - `probeDeveloperRole(baseUrl, apiKey?, modelId)` → `true | false | undefined`
 - `fetchGatewayWideInfo(baseUrl, { apiKey?, profile?, ollama? })`
 - `fetchPerModelInfo(baseUrl, ids, { apiKey?, ollama? })`
-- `finalizeModelInfo(ids, ...maps)` — merge metadata maps + local rules + defaults
-- `resolveModelInfo(id, info?)` — local rules + defaults for one model
+- `finalizeModelInfo(ids, maps, { modelsDev? }?)` — merge metadata maps + local rules + models.dev + defaults
+- `resolveModelInfo(id, info?, modelsDev?)` — local rules + models.dev + defaults for one model
 - `applyKnownModelFallback(id, info?)` — fill gaps from the local rules
 - `applyModelDefaults(info?)` / `MODEL_INFO_DEFAULTS` — the default tier
+- `fetchModelsDevProviders()` / `fetchModelsDevModels(providerId)` /
+  `fetchModelsDevInfoForBaseUrl(baseUrl)` — the models.dev catalog tier
 - `registerKnownModelRules(rules)` / `reloadKnownModelRules()` — extend the rules
 - `describeProbeInfo(info)` / `probeInfoSummary(info)` — formatting helpers
 - `enrichLiteLLMModelInfo` / `enrichLiteLLMModelGroupInfo` /
@@ -121,6 +130,7 @@ type ModelProbeInfo = {
 	endpointTypes?: string[]; // New API / One API supported_endpoint_types
 	inferred?: boolean;       // at least one field came from the local rules
 	inferredFields?: Array<"contextWindow" | "vision" | "reasoning">;
+	modelsDevFields?: Array<"contextWindow" | "vision" | "reasoning">; // from models.dev
 	defaultedFields?: Array<"vision" | "reasoning">; // filled from MODEL_INFO_DEFAULTS
 };
 ```

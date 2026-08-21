@@ -195,7 +195,9 @@ function hasProbeInfo(info: ModelProbeInfo | undefined): boolean {
 export function describeProbeInfo(info: ModelProbeInfo | undefined): string | undefined {
 	if (!info) return undefined;
 	const inferred = new Set(info.inferredFields ?? []);
-	const tag = (field: "contextWindow" | "vision" | "reasoning") => (inferred.has(field) ? " [local rules]" : "");
+	const fromModelsDev = new Set(info.modelsDevFields ?? []);
+	const tag = (field: "contextWindow" | "vision" | "reasoning") =>
+		inferred.has(field) ? " [local rules]" : fromModelsDev.has(field) ? " [models.dev]" : "";
 	const parts: string[] = [];
 	if (info.contextWindow !== undefined) parts.push(`ctx ${info.contextWindow}${tag("contextWindow")}`);
 	// Only values that differ from the defaults (vision: false, reasoning:

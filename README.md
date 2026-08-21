@@ -29,6 +29,10 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
   DeepSeek, Qwen, Kimi, GLM, Gemini, ...) fills any fields the gateway didn't
   report. Fields filled this way are tagged (`inferred` / `inferredFields`).
   The table is data (`rules.json`), not code — see [Custom rules](#custom-rules).
+- **Developer-role probe** (opt-in) — one tiny chat completion with a
+  `developer`-role message tells you whether the gateway accepts the OpenAI
+  developer role. Gateways that don't (Kimi's subscription endpoint, some
+  One API forks) reject it with a 400, and clients must fall back to `system`.
 
 All fetches time out after 4s and run with bounded concurrency; everything
 beyond the model list itself is best-effort.
@@ -48,11 +52,13 @@ model-probe https://openrouter.ai/api/v1 --json
 Usage: model-probe <baseUrl> [options]
 
 Options:
-  --key <apiKey>    Bearer token for the gateway
-  --ollama          Use Ollama native endpoints (/api/tags, /api/show)
-  --no-fallback     Do not fill gaps from the built-in known-model rules
-  --json            Print the raw result as JSON
-  -h, --help        Show this help
+  --key <apiKey>     Bearer token for the gateway
+  --ollama           Use Ollama native endpoints (/api/tags, /api/show)
+  --developer-role   Also probe whether the gateway accepts the OpenAI
+                     "developer" role (one tiny chat completion)
+  --no-fallback      Do not fill gaps from the built-in known-model rules
+  --json             Print the raw result as JSON
+  -h, --help         Show this help
 ```
 
 ## Library
@@ -67,6 +73,9 @@ const result = await detectModels("https://api.example.com/v1", {
 	// extra endpoints are tried; defaults to trying everything.
 	// ollama: true — use Ollama native endpoints instead of /models/{id}.
 	// knownModelFallback: false — disable the built-in model table.
+	// developerRole: true — also probe developer-role support (one tiny
+	//   chat completion); result.supportsDeveloperRole is true/false, or
+	//   undefined when the probe was inconclusive.
 });
 
 console.log(result.baseUrl); // the base that actually answered (±/v1 adapted)
@@ -81,7 +90,8 @@ const { ids, infoById, baseUrl } = await probeModels("http://localhost:4000");
 ### API
 
 - `probeModels(baseUrl, apiKey?)` → `{ ids, infoById, baseUrl }`
-- `detectModels(baseUrl, options?)` → `ProbeResult & { models }`
+- `detectModels(baseUrl, options?)` → `ProbeResult & { models, supportsDeveloperRole? }`
+- `probeDeveloperRole(baseUrl, apiKey?, modelId)` → `true | false | undefined`
 - `fetchGatewayWideInfo(baseUrl, { apiKey?, profile?, ollama? })`
 - `fetchPerModelInfo(baseUrl, ids, { apiKey?, ollama? })`
 - `finalizeModelInfo(ids, ...maps)` — merge metadata maps + local rules

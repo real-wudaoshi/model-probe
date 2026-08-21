@@ -10,6 +10,7 @@ export {
 	probeInfoSummary,
 	probeModels,
 } from "./src/probe.ts";
+export { probeDeveloperRole } from "./src/developer-role.ts";
 export { detectModels, fetchGatewayWideInfo, fetchPerModelInfo, finalizeModelInfo } from "./src/detect.ts";
 export type { DetectOptions, DetectResult } from "./src/detect.ts";
 export { FULL_PROFILE, PROBE_CONCURRENCY, PROBE_TIMEOUT_MS } from "./src/types.ts";

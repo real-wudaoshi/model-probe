@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // model-probe CLI: probe an OpenAI-compatible gateway for models + metadata.
 //
-//   model-probe <baseUrl> [--key <apiKey>] [--ollama] [--no-fallback] [--json]
+//   model-probe <baseUrl> [--key <apiKey>] [--ollama] [--developer-role] [--no-fallback] [--json]
 //
 // Requires Node >= 22.18 (runs TypeScript natively via type stripping).
 import { applyKnownModelFallback, describeProbeInfo, detectModels, probeInfoSummary } from "./index.ts";
@@ -10,11 +10,13 @@ function usage(): never {
 	console.log(`Usage: model-probe <baseUrl> [options]
 
 Options:
-  --key <apiKey>    Bearer token for the gateway
-  --ollama          Use Ollama native endpoints (/api/tags, /api/show)
-  --no-fallback     Do not fill gaps from the built-in known-model rules
-  --json            Print the raw result as JSON
-  -h, --help        Show this help`);
+  --key <apiKey>     Bearer token for the gateway
+  --ollama           Use Ollama native endpoints (/api/tags, /api/show)
+  --developer-role   Also probe whether the gateway accepts the OpenAI
+                     "developer" role (one tiny chat completion)
+  --no-fallback      Do not fill gaps from the built-in known-model rules
+  --json             Print the raw result as JSON
+  -h, --help         Show this help`);
 	process.exit(0);
 }
 
@@ -22,6 +24,7 @@ const args = process.argv.slice(2);
 let baseUrl: string | undefined;
 let apiKey: string | undefined;
 let ollama = false;
+let developerRole = false;
 let knownModelFallback = true;
 let json = false;
 
@@ -30,6 +33,7 @@ for (let i = 0; i < args.length; i++) {
 	if (arg === "-h" || arg === "--help") usage();
 	else if (arg === "--key") apiKey = args[++i];
 	else if (arg === "--ollama") ollama = true;
+	else if (arg === "--developer-role") developerRole = true;
 	else if (arg === "--no-fallback") knownModelFallback = false;
 	else if (arg === "--json") json = true;
 	else if (!arg.startsWith("-") && baseUrl === undefined) baseUrl = arg;
@@ -42,7 +46,7 @@ for (let i = 0; i < args.length; i++) {
 if (!baseUrl) usage();
 
 try {
-	const result = await detectModels(baseUrl, { apiKey, ollama, knownModelFallback });
+	const result = await detectModels(baseUrl, { apiKey, ollama, knownModelFallback, developerRole });
 
 	if (json) {
 		console.log(
@@ -51,6 +55,7 @@ try {
 					baseUrl: result.baseUrl,
 					ids: result.ids,
 					models: Object.fromEntries(result.models),
+					...(developerRole ? { supportsDeveloperRole: result.supportsDeveloperRole ?? null } : {}),
 				},
 				null,
 				2,
@@ -61,6 +66,10 @@ try {
 
 	console.log(`Base URL: ${result.baseUrl}`);
 	console.log(`Models:   ${result.ids.length}`);
+	if (developerRole) {
+		const support = result.supportsDeveloperRole;
+		console.log(`Developer role: ${support === undefined ? "unknown (probe inconclusive)" : support ? "supported" : "NOT supported"}`);
+	}
 	let detected = 0;
 	let inferred = 0;
 	for (const id of result.ids) {

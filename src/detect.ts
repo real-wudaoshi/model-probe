@@ -1,4 +1,5 @@
 import { applyKnownModelFallback } from "./known-models.ts";
+import { probeDeveloperRole } from "./developer-role.ts";
 import {
 	enrichLiteLLMModelGroupInfo,
 	enrichLiteLLMModelInfo,
@@ -18,11 +19,15 @@ export interface DetectOptions {
 	ollama?: boolean;
 	/** Fill remaining gaps from the built-in known-model rules (default true). */
 	knownModelFallback?: boolean;
+	/** Also probe whether the gateway accepts the OpenAI "developer" role (one tiny chat completion). */
+	developerRole?: boolean;
 }
 
 export interface DetectResult extends ProbeResult {
 	/** Final per-model metadata: inline list fields + gateway-wide + per-model + local rules. */
 	models: Map<string, ModelProbeInfo>;
+	/** Developer-role support, when requested via DetectOptions.developerRole. */
+	supportsDeveloperRole?: boolean;
 }
 
 // Gateway-wide metadata sources: each answers for EVERY model in a single
@@ -118,5 +123,9 @@ export async function detectModels(baseUrl: string, options: DetectOptions = {})
 			? finalizeModelInfo([], probed.infoById, gatewayWide, details)
 			: finalizeModelInfo(probed.ids, probed.infoById, gatewayWide, details);
 
-	return { ...probed, models };
+	const result: DetectResult = { ...probed, models };
+	if (options.developerRole && probed.ids.length > 0) {
+		result.supportsDeveloperRole = await probeDeveloperRole(probed.baseUrl, options.apiKey, probed.ids[0]);
+	}
+	return result;
 }

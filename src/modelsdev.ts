@@ -1,6 +1,6 @@
 // models.dev as a metadata source: provider catalog (which API sites exist,
-// their base URLs) and per-provider model metadata (context window, vision,
-// reasoning, effort options).
+// their base URLs) and per-provider model metadata (context window, image,
+// video, reasoning, effort options).
 //
 // In the metadata priority order models.dev sits ABOVE the local known-model
 // rules: a catalog entry is curated per-model data, while a rule is a regex
@@ -129,7 +129,10 @@ function parseModelEntry(model: Model): ModelProbeInfo | undefined {
 	const info: ModelProbeInfo = {};
 
 	if (Number.isFinite(model.limit?.context) && model.limit.context > 0) info.contextWindow = model.limit.context;
-	if (Array.isArray(model.modalities?.input)) info.vision = model.modalities.input.includes("image");
+	if (Array.isArray(model.modalities?.input)) {
+		info.image = model.modalities.input.includes("image");
+		info.video = model.modalities.input.includes("video");
+	}
 	if (typeof model.reasoning === "boolean") info.reasoning = model.reasoning;
 
 	const effort = model.reasoning_options?.find((o) => o.type === "effort");

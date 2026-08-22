@@ -1,7 +1,7 @@
 # model-probe
 
 Probe OpenAI-compatible gateways for their model list and per-model metadata
-(context window, vision, reasoning, endpoint types). Works with LiteLLM,
+(context window, image/video input, reasoning, endpoint types). Works with LiteLLM,
 One API, New API, OpenRouter, Google's native Gemini API, Ollama, and generic
 OpenAI-compatible servers.
 
@@ -42,7 +42,8 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
   cached for the session, and never blocks a probe. Disable with
   `profile: { modelsDev: false }`.
 - **Defaults** — fields nothing else answered are filled from
-  `MODEL_INFO_DEFAULTS` (`vision: false`, `reasoning: true`) and tagged in
+  `MODEL_INFO_DEFAULTS` (`image: false`, `video: false`, `reasoning: true`)
+  and tagged in
   `defaultedFields`. Priority: detected > models.dev > local rule > default.
   `describeProbeInfo` only renders values that differ from the defaults.
 - **Developer-role probe** (opt-in) — one tiny chat completion with a
@@ -128,15 +129,16 @@ const { ids, infoById, baseUrl } = await probeModels("http://localhost:4000");
 ```ts
 type ModelProbeInfo = {
 	contextWindow?: number;
-	vision?: boolean;
+	image?: boolean;    // accepts image input
+	video?: boolean;    // accepts video input
 	reasoning?: boolean;
 	alwaysThinking?: boolean;
 	effortOptions?: string[];
 	endpointTypes?: string[]; // New API / One API supported_endpoint_types
 	inferred?: boolean;       // at least one field came from the local rules
-	inferredFields?: Array<"contextWindow" | "vision" | "reasoning">;
-	modelsDevFields?: Array<"contextWindow" | "vision" | "reasoning">; // from models.dev
-	defaultedFields?: Array<"vision" | "reasoning">; // filled from MODEL_INFO_DEFAULTS
+	inferredFields?: Array<"contextWindow" | "image" | "video" | "reasoning">;
+	modelsDevFields?: Array<"contextWindow" | "image" | "video" | "reasoning">; // from models.dev
+	defaultedFields?: Array<"image" | "video" | "reasoning">; // filled from MODEL_INFO_DEFAULTS
 };
 ```
 
@@ -147,19 +149,19 @@ runtime. Each entry is a regex matched against the model id:
 
 ```json
 [
-	{ "pattern": "^my-model", "contextWindow": 65536, "vision": true, "reasoning": false }
+	{ "pattern": "^my-model", "contextWindow": 65536, "image": true, "video": false, "reasoning": false }
 ]
 ```
 
 - `pattern` — RegExp source; `flags` optional, defaults to `"i"`.
-- `contextWindow` / `vision` / `reasoning` — all optional; omit what you don't know.
+- `contextWindow` / `image` / `video` / `reasoning` — all optional; omit what you don't know.
 
 To add or override rules, drop a JSON file with the same shape at
 `~/.model-probe-rules.json`, or point the `MODEL_PROBE_RULES` env var at any
 path. Matching is per-field and first-match-wins: your rules are consulted
 before the built-in table, and fields your rule doesn't define still fall
 through to built-in rules (e.g. override just `contextWindow` for `gpt-5-mini`
-and it keeps the built-in `vision`/`reasoning`).
+and it keeps the built-in `image`/`reasoning`).
 
 Library users can also register rules in code:
 

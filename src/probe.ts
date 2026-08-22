@@ -151,19 +151,23 @@ export async function probeModels(baseUrl: string, apiKey?: string): Promise<Pro
 }
 
 // Field defaults applied when neither the gateway nor the local rules say
-// anything: reasoning on (most current models think), vision off (image input
-// is opt-in). contextWindow has no default. Developer-role support is a
+// anything: reasoning on (most current models think), image and video input
+// off (opt-in). contextWindow has no default. Developer-role support is a
 // gateway-level probe and defaults to false as well (see developer-role.ts).
-export const MODEL_INFO_DEFAULTS = { vision: false, reasoning: true } as const;
+export const MODEL_INFO_DEFAULTS = { image: false, video: false, reasoning: true } as const;
 
 // Fill still-unknown fields from MODEL_INFO_DEFAULTS, tagging them in
 // defaultedFields. Detected and local-rule values always win.
 export function applyModelDefaults(info: ModelProbeInfo | undefined): ModelProbeInfo {
 	const out: ModelProbeInfo = { ...(info ?? {}) };
-	const defaulted: Array<"vision" | "reasoning"> = [...(info?.defaultedFields ?? [])];
-	if (out.vision === undefined) {
-		out.vision = MODEL_INFO_DEFAULTS.vision;
-		defaulted.push("vision");
+	const defaulted: Array<"image" | "video" | "reasoning"> = [...(info?.defaultedFields ?? [])];
+	if (out.image === undefined) {
+		out.image = MODEL_INFO_DEFAULTS.image;
+		defaulted.push("image");
+	}
+	if (out.video === undefined) {
+		out.video = MODEL_INFO_DEFAULTS.video;
+		defaulted.push("video");
 	}
 	if (out.reasoning === undefined) {
 		out.reasoning = MODEL_INFO_DEFAULTS.reasoning;
@@ -181,7 +185,8 @@ export function probeInfoSummary(info: ModelProbeInfo | undefined): string[] {
 	const parts: string[] = [];
 	if (info.contextWindow !== undefined) parts.push("context");
 	if (info.reasoning !== undefined && !defaulted.has("reasoning")) parts.push("reasoning");
-	if (info.vision !== undefined && !defaulted.has("vision")) parts.push("vision");
+	if (info.image !== undefined && !defaulted.has("image")) parts.push("image");
+	if (info.video !== undefined && !defaulted.has("video")) parts.push("video");
 	return parts;
 }
 
@@ -196,14 +201,16 @@ export function describeProbeInfo(info: ModelProbeInfo | undefined): string | un
 	if (!info) return undefined;
 	const inferred = new Set(info.inferredFields ?? []);
 	const fromModelsDev = new Set(info.modelsDevFields ?? []);
-	const tag = (field: "contextWindow" | "vision" | "reasoning") =>
+	const tag = (field: "contextWindow" | "image" | "video" | "reasoning") =>
 		inferred.has(field) ? " [local rules]" : fromModelsDev.has(field) ? " [models.dev]" : "";
 	const parts: string[] = [];
 	if (info.contextWindow !== undefined) parts.push(`ctx ${info.contextWindow}${tag("contextWindow")}`);
-	// Only values that differ from the defaults (vision: false, reasoning:
-	// true) are worth showing — a model with default values gets no tag at
-	// all, even if the default was really detected (e.g. probed "no vision").
-	if (info.vision === true) parts.push(`vision${tag("vision")}`);
+	// Only values that differ from the defaults (image/video: false,
+	// reasoning: true) are worth showing — a model with default values gets
+	// no tag at all, even if the default was really detected (e.g. probed
+	// "no image input").
+	if (info.image === true) parts.push(`image${tag("image")}`);
+	if (info.video === true) parts.push(`video${tag("video")}`);
 	if (info.reasoning === false) parts.push(`no reasoning${tag("reasoning")}`);
 	else if (info.reasoning === true && info.alwaysThinking) parts.push(`reasoning (always on)${tag("reasoning")}`);
 	if (info.endpointTypes && info.endpointTypes.length > 0) parts.push(info.endpointTypes.join("/"));
@@ -223,11 +230,11 @@ function parseGatewayMetaFields(source: any, info: ModelProbeInfo): void {
 	}
 	const capabilities = meta.capabilities;
 	if (capabilities && typeof capabilities === "object") {
-		if (info.vision === undefined && typeof capabilities.vision === "boolean") info.vision = capabilities.vision;
+		if (info.image === undefined && typeof capabilities.vision === "boolean") info.image = capabilities.vision;
 		if (info.reasoning === undefined && typeof capabilities.reasoning === "boolean") info.reasoning = capabilities.reasoning;
 		if (info.reasoning === undefined && typeof capabilities.thinking === "boolean") info.reasoning = capabilities.thinking;
 	}
-	if (info.vision === undefined && typeof meta.supports_vision === "boolean") info.vision = meta.supports_vision;
+	if (info.image === undefined && typeof meta.supports_vision === "boolean") info.image = meta.supports_vision;
 	if (info.reasoning === undefined && typeof meta.supports_reasoning === "boolean") info.reasoning = meta.supports_reasoning;
 }
 
@@ -246,11 +253,14 @@ function parseModelListItem(item: any): ModelProbeInfo | undefined {
 		: Array.isArray(item.modalities)
 			? item.modalities
 			: undefined;
-	if (modalities) info.vision = modalities.includes("image");
+	if (modalities) {
+		info.image = modalities.includes("image");
+		info.video = modalities.includes("video");
+	}
 
 	if (Array.isArray(item.capabilities)) {
 		if (info.reasoning === undefined) info.reasoning = item.capabilities.includes("thinking") || item.capabilities.includes("reasoning");
-		if (info.vision === undefined) info.vision = item.capabilities.includes("vision");
+		if (info.image === undefined) info.image = item.capabilities.includes("vision");
 	}
 
 	// New API's /v1/models entries carry supported_endpoint_types
@@ -281,7 +291,7 @@ function parseOpenAIModelDetail(json: any): ModelProbeInfo | undefined {
 			typeof capabilities.vision === "object" &&
 			typeof capabilities.vision.supported === "boolean"
 		) {
-			info.vision = capabilities.vision.supported;
+			info.image = capabilities.vision.supported;
 		}
 		const reasoning = capabilities.reasoning;
 		if (reasoning && typeof reasoning === "object") {
@@ -323,7 +333,7 @@ function parseModelGroupInfo(json: any, out: Map<string, ModelProbeInfo>): boole
 		const parsed: ModelProbeInfo = {};
 		const contextWindow = firstFiniteNumber(entry, "max_input_tokens", "context_window");
 		if (contextWindow !== undefined) parsed.contextWindow = contextWindow;
-		if (typeof entry.supports_vision === "boolean") parsed.vision = entry.supports_vision;
+		if (typeof entry.supports_vision === "boolean") parsed.image = entry.supports_vision;
 		if (typeof entry.supports_reasoning === "boolean") parsed.reasoning = entry.supports_reasoning;
 		if (probeInfoSummary(parsed).length > 0) {
 			out.set(name, parsed);
@@ -390,7 +400,7 @@ function parsePublicModelList(json: any, out: Map<string, ModelProbeInfo>): bool
 		const contextWindow = firstFiniteNumber(entry, "context_window", "contextWindow", "max_input_tokens");
 		if (contextWindow !== undefined) parsed.contextWindow = contextWindow;
 		// Best effort: some catalogs also publish capability flags.
-		if (typeof entry.supports_vision === "boolean") parsed.vision = entry.supports_vision;
+		if (typeof entry.supports_vision === "boolean") parsed.image = entry.supports_vision;
 		if (typeof entry.supports_reasoning === "boolean") parsed.reasoning = entry.supports_reasoning;
 		if (probeInfoSummary(parsed).length > 0) {
 			out.set(name, parsed);
@@ -454,7 +464,7 @@ function parseLiteLLMModelInfo(json: any, out: Map<string, ModelProbeInfo>): boo
 		const parsed: ModelProbeInfo = {};
 		const contextWindow = firstFiniteNumber(info, "context_window", "max_input_tokens");
 		if (contextWindow !== undefined) parsed.contextWindow = contextWindow;
-		if (typeof info.supports_vision === "boolean") parsed.vision = info.supports_vision;
+		if (typeof info.supports_vision === "boolean") parsed.image = info.supports_vision;
 		if (typeof info.supports_reasoning === "boolean") parsed.reasoning = info.supports_reasoning;
 		if (probeInfoSummary(parsed).length > 0) {
 			out.set(name, parsed);
@@ -585,7 +595,7 @@ export async function enrichOllamaModelDetails(
 				const name = typeof model?.name === "string" ? model.name.trim() : "";
 				if (!name) continue;
 				const info: ModelProbeInfo = {};
-				if (Array.isArray(model.capabilities)) info.vision = model.capabilities.includes("vision");
+				if (Array.isArray(model.capabilities)) info.image = model.capabilities.includes("vision");
 				if (Object.keys(info).length > 0) out.set(name, info);
 			}
 		}
@@ -618,7 +628,7 @@ export async function enrichOllamaModelDetails(
 						}
 					}
 				}
-				if (Array.isArray(json?.capabilities)) info.vision = json.capabilities.includes("vision");
+				if (Array.isArray(json?.capabilities)) info.image = json.capabilities.includes("vision");
 				out.set(id, info);
 			} catch {
 				// Best effort.

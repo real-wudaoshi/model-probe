@@ -7,15 +7,16 @@
 //   4. default    — filled from MODEL_INFO_DEFAULTS (listed in defaultedFields)
 export type ModelProbeInfo = {
 	contextWindow?: number;
-	vision?: boolean;
+	image?: boolean; // accepts image input
+	video?: boolean; // accepts video input
 	reasoning?: boolean;
 	alwaysThinking?: boolean; // reasoning exists but cannot be turned off
 	effortOptions?: string[]; // provider reasoning-effort names (none/minimal/low/.../max)
 	endpointTypes?: string[]; // New API / One API: supported_endpoint_types (chat, embeddings, ...)
 	inferred?: boolean; // at least one field was filled from the local rules
-	inferredFields?: Array<"contextWindow" | "vision" | "reasoning">; // which fields came from the local rules
-	modelsDevFields?: Array<"contextWindow" | "vision" | "reasoning">; // which fields came from models.dev
-	defaultedFields?: Array<"vision" | "reasoning">; // which fields came from MODEL_INFO_DEFAULTS
+	inferredFields?: Array<"contextWindow" | "image" | "video" | "reasoning">; // which fields came from the local rules
+	modelsDevFields?: Array<"contextWindow" | "image" | "video" | "reasoning">; // which fields came from models.dev
+	defaultedFields?: Array<"image" | "video" | "reasoning">; // which fields came from MODEL_INFO_DEFAULTS
 };
 
 export type ProbeResult = {

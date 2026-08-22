@@ -68,7 +68,8 @@ export async function fetchGatewayWideInfo(
 			}
 			const filled = { ...existing };
 			if (filled.contextWindow === undefined && info.contextWindow !== undefined) filled.contextWindow = info.contextWindow;
-			if (filled.vision === undefined && info.vision !== undefined) filled.vision = info.vision;
+			if (filled.image === undefined && info.image !== undefined) filled.image = info.image;
+			if (filled.video === undefined && info.video !== undefined) filled.video = info.video;
 			if (filled.reasoning === undefined && info.reasoning !== undefined) filled.reasoning = info.reasoning;
 			out.set(id, filled);
 		}
@@ -92,8 +93,8 @@ export async function fetchPerModelInfo(
 function applyModelsDevFallback(info: ModelProbeInfo | undefined, modelsDev: ModelProbeInfo | undefined): ModelProbeInfo | undefined {
 	if (!modelsDev) return info;
 	const out: ModelProbeInfo = { ...(info ?? {}) };
-	const tagged: Array<"contextWindow" | "vision" | "reasoning"> = [...(info?.modelsDevFields ?? [])];
-	for (const field of ["contextWindow", "vision", "reasoning"] as const) {
+	const tagged: Array<"contextWindow" | "image" | "video" | "reasoning"> = [...(info?.modelsDevFields ?? [])];
+	for (const field of ["contextWindow", "image", "video", "reasoning"] as const) {
 		if (out[field] === undefined && modelsDev[field] !== undefined) {
 			out[field] = modelsDev[field];
 			tagged.push(field);

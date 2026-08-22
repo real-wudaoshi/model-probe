@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 import type { ModelProbeInfo } from "./types.ts";
 
 // Known-model rules classify well-known model ids and preset their context
-// window, vision, and reasoning support. Used when a gateway exposes no
-// metadata (stock One API / New API, bare proxies, manually added models).
+// window, image/video input, and reasoning support. Used when a gateway
+// exposes no metadata (stock One API / New API, bare proxies, manually added
+// models).
 //
 // Rules are DATA, loaded at runtime (rules.json shipped with the package),
 // so users can extend them:
@@ -23,14 +24,16 @@ export type KnownModelRule = {
 	/** RegExp flags, default "i". */
 	flags?: string;
 	contextWindow?: number;
-	vision?: boolean;
+	image?: boolean;
+	video?: boolean;
 	reasoning?: boolean;
 };
 
 type CompiledRule = {
 	regex: RegExp;
 	contextWindow?: number;
-	vision?: boolean;
+	image?: boolean;
+	video?: boolean;
 	reasoning?: boolean;
 };
 
@@ -60,7 +63,8 @@ function compileRules(raw: unknown, source: string): CompiledRule[] {
 			out.push({
 				regex: new RegExp(entry.pattern, typeof entry.flags === "string" ? entry.flags : "i"),
 				contextWindow: typeof entry.contextWindow === "number" ? entry.contextWindow : undefined,
-				vision: typeof entry.vision === "boolean" ? entry.vision : undefined,
+				image: typeof entry.image === "boolean" ? entry.image : undefined,
+				video: typeof entry.video === "boolean" ? entry.video : undefined,
 				reasoning: typeof entry.reasoning === "boolean" ? entry.reasoning : undefined,
 			});
 		} catch {
@@ -95,7 +99,7 @@ function loadRules(): CompiledRule[] {
 // Classify a model id against the rules and return the preset metadata.
 // Matching is per-field: the first matching rule that defines a field wins,
 // later rules fill fields it didn't define — so a user rule that only sets
-// contextWindow still inherits vision/reasoning from the built-in table.
+// contextWindow still inherits image/video/reasoning from the built-in table.
 function matchKnownModelRule(modelId: string): ModelProbeInfo | undefined {
 	const info: ModelProbeInfo = {};
 	let matched = false;
@@ -103,9 +107,10 @@ function matchKnownModelRule(modelId: string): ModelProbeInfo | undefined {
 		if (!rule.regex.test(modelId)) continue;
 		matched = true;
 		if (info.contextWindow === undefined && rule.contextWindow !== undefined) info.contextWindow = rule.contextWindow;
-		if (info.vision === undefined && rule.vision !== undefined) info.vision = rule.vision;
+		if (info.image === undefined && rule.image !== undefined) info.image = rule.image;
+		if (info.video === undefined && rule.video !== undefined) info.video = rule.video;
 		if (info.reasoning === undefined && rule.reasoning !== undefined) info.reasoning = rule.reasoning;
-		if (info.contextWindow !== undefined && info.vision !== undefined && info.reasoning !== undefined) break;
+		if (info.contextWindow !== undefined && info.image !== undefined && info.video !== undefined && info.reasoning !== undefined) break;
 	}
 	return matched ? info : undefined;
 }
@@ -117,14 +122,18 @@ export function applyKnownModelFallback(modelId: string, info: ModelProbeInfo | 
 	const known = matchKnownModelRule(modelId);
 	if (!known) return info;
 	const filled: ModelProbeInfo = {};
-	const inferredFields: Array<"contextWindow" | "vision" | "reasoning"> = [];
+	const inferredFields: Array<"contextWindow" | "image" | "video" | "reasoning"> = [];
 	if (info?.contextWindow === undefined && known.contextWindow !== undefined) {
 		filled.contextWindow = known.contextWindow;
 		inferredFields.push("contextWindow");
 	}
-	if (info?.vision === undefined && known.vision !== undefined) {
-		filled.vision = known.vision;
-		inferredFields.push("vision");
+	if (info?.image === undefined && known.image !== undefined) {
+		filled.image = known.image;
+		inferredFields.push("image");
+	}
+	if (info?.video === undefined && known.video !== undefined) {
+		filled.video = known.video;
+		inferredFields.push("video");
 	}
 	if (info?.reasoning === undefined && known.reasoning !== undefined) {
 		filled.reasoning = known.reasoning;

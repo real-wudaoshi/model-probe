@@ -26,7 +26,7 @@ export interface DetectOptions {
 }
 
 export interface DetectResult extends ProbeResult {
-	/** Final per-model metadata: inline list fields + gateway-wide + per-model + local rules. */
+	/** Final per-model metadata: inline list fields + gateway-wide + per-model + models.dev + local rules. */
 	models: Map<string, ModelProbeInfo>;
 	/** Developer-role support (probed value, or the default false), when requested via DetectOptions.developerRole. */
 	supportsDeveloperRole?: boolean;
@@ -87,8 +87,8 @@ export async function fetchPerModelInfo(
 }
 
 // Fill still-unknown fields from the models.dev catalog (matched by base URL
-// upstream), tagging them in modelsDevFields. Runs after the local rules and
-// before the defaults.
+// upstream), tagging them in modelsDevFields. Runs before the local rules: a
+// catalog entry is curated per-model data, while a rule is a regex guess.
 function applyModelsDevFallback(info: ModelProbeInfo | undefined, modelsDev: ModelProbeInfo | undefined): ModelProbeInfo | undefined {
 	if (!modelsDev) return info;
 	const out: ModelProbeInfo = { ...(info ?? {}) };
@@ -106,19 +106,19 @@ function applyModelsDevFallback(info: ModelProbeInfo | undefined, modelsDev: Mod
 }
 
 // Resolve the final metadata for one model: detected values win, then the
-// local rules, then the models.dev catalog, then MODEL_INFO_DEFAULTS. The
-// source of each filled field is tagged (inferredFields / modelsDevFields /
-// defaultedFields).
+// models.dev catalog (exact per-model entries), then the local rules (regex
+// guesses), then MODEL_INFO_DEFAULTS. The source of each filled field is
+// tagged (modelsDevFields / inferredFields / defaultedFields).
 export function resolveModelInfo(
 	modelId: string,
 	info?: ModelProbeInfo,
 	modelsDev?: Map<string, ModelProbeInfo>,
 ): ModelProbeInfo {
-	return applyModelDefaults(applyModelsDevFallback(applyKnownModelFallback(modelId, info), modelsDev?.get(modelId)));
+	return applyModelDefaults(applyKnownModelFallback(modelId, applyModelsDevFallback(info, modelsDev?.get(modelId))));
 }
 
 // Merge metadata maps for `ids` (later maps win) and resolve each id through
-// the local rules + models.dev + defaults.
+// models.dev + the local rules + defaults.
 export function finalizeModelInfo(
 	ids: string[],
 	maps: Array<Map<string, ModelProbeInfo>>,
@@ -157,7 +157,7 @@ export async function detectModels(baseUrl: string, options: DetectOptions = {})
 	}
 
 	// models.dev catalog, matched to the probed base URL. Fetched like a
-	// gateway-wide source but applied BELOW the local rules at finalize time.
+	// gateway-wide source but applied ABOVE the local rules at finalize time.
 	let modelsDev = new Map<string, ModelProbeInfo>();
 	if (profile.modelsDev) {
 		modelsDev = await fetchModelsDevInfoForBaseUrl(probed.baseUrl);

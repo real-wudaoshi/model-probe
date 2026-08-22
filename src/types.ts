@@ -1,10 +1,10 @@
 // Best-effort model metadata detected while probing a gateway.
 //
-// Every field has one of three sources, highest priority first:
-//   1. detected  — real data from the gateway (no tag)
-//   2. local rule — filled from the known-model table (listed in inferredFields)
-//   3. models.dev — filled from the models.dev catalog (listed in modelsDevFields)
-//   4. default   — filled from MODEL_INFO_DEFAULTS (listed in defaultedFields)
+// Every field has one of four sources, highest priority first:
+//   1. detected   — real data from the gateway (no tag)
+//   2. models.dev — exact per-model catalog entries (listed in modelsDevFields)
+//   3. local rule — regex guesses from the known-model table (listed in inferredFields)
+//   4. default    — filled from MODEL_INFO_DEFAULTS (listed in defaultedFields)
 export type ModelProbeInfo = {
 	contextWindow?: number;
 	vision?: boolean;

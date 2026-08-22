@@ -26,20 +26,22 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
 - **Per-model details** — `GET /models/{id}`, or Ollama native
   `GET /api/tags` + `POST /api/show`.
 - **Local rules** — a built-in table of well-known models (OpenAI, Anthropic,
-  DeepSeek, Qwen, Kimi, GLM, Gemini, ...) fills any fields the gateway didn't
-  report. Fields filled this way are tagged (`inferred` / `inferredFields`).
+  DeepSeek, Qwen, Kimi, GLM, Gemini, ...) fills any fields the gateway and
+  models.dev didn't report. Fields filled this way are tagged (`inferred` /
+  `inferredFields`).
   The table is data (`rules.json`), not code — see [Custom rules](#custom-rules).
 - **models.dev** — the [models.dev](https://models.dev) catalog fills any
-  fields still unset after the local rules, tagged in `modelsDevFields`.
-  Data comes from the official SDK (`@opencode-ai/models`): the live API is
-  tried first, and when models.dev is unreachable the snapshot bundled with
-  the SDK (at most ~24h stale) is used instead, so this tier also works
-  offline. Matched per gateway base URL against the catalog's provider list,
-  cached for the session, and never blocks a probe. Disable with
-  `profile: { modelsDev: false }`.
+  fields the gateway didn't report, tagged in `modelsDevFields`. Entries are
+  exact per-model records, so they outrank the local rules (which are regex
+  guesses). Data comes from the official SDK (`@opencode-ai/models`): the
+  live API is tried first, and when models.dev is unreachable the snapshot
+  bundled with the SDK (at most ~24h stale) is used instead, so this tier
+  also works offline. Matched per gateway base URL against the catalog's
+  provider list, cached for the session, and never blocks a probe. Disable
+  with `profile: { modelsDev: false }`.
 - **Defaults** — fields nothing else answered are filled from
   `MODEL_INFO_DEFAULTS` (`vision: false`, `reasoning: true`) and tagged in
-  `defaultedFields`. Priority: detected > local rule > models.dev > default.
+  `defaultedFields`. Priority: detected > models.dev > local rule > default.
   `describeProbeInfo` only renders values that differ from the defaults.
 - **Developer-role probe** (opt-in) — one tiny chat completion with a
   `developer`-role message tells you whether the gateway accepts the OpenAI

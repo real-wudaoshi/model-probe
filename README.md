@@ -31,11 +31,12 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
   The table is data (`rules.json`), not code — see [Custom rules](#custom-rules).
 - **models.dev** — the [models.dev](https://models.dev) catalog fills any
   fields still unset after the local rules, tagged in `modelsDevFields`.
-  Fetched lazily per gateway base URL (matched against the catalog's provider
-  list), cached for the session, and never blocks a probe: when models.dev is
-  unreachable the tier is silently skipped. `https://models.dev/api.json` is
-  tried first, with the GitHub repo (via jsDelivr) as mirror fallback.
-  Disable with `profile: { modelsDev: false }`.
+  Data comes from the official SDK (`@opencode-ai/models`): the live API is
+  tried first, and when models.dev is unreachable the snapshot bundled with
+  the SDK (at most ~24h stale) is used instead, so this tier also works
+  offline. Matched per gateway base URL against the catalog's provider list,
+  cached for the session, and never blocks a probe. Disable with
+  `profile: { modelsDev: false }`.
 - **Defaults** — fields nothing else answered are filled from
   `MODEL_INFO_DEFAULTS` (`vision: false`, `reasoning: true`) and tagged in
   `defaultedFields`. Priority: detected > local rule > models.dev > default.

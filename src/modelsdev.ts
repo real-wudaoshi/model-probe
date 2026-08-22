@@ -7,11 +7,17 @@
 // guess. Detected > models.dev > local rule > default. Fields filled from
 // here are tagged in modelsDevFields.
 //
-// Data comes from the official models.dev SDK (@opencode-ai/models). The live
-// API (GET https://models.dev/api.json) is tried first; when models.dev is
-// unreachable (DNS poisoning / TLS resets on some networks) the snapshot
-// bundled inside the SDK — at most ~24h behind the live API — is used
-// instead, so this tier works fully offline.
+// Data comes from the official models.dev SDK (@opencode-ai/models), three
+// sources in order:
+//   1. live API (GET https://models.dev/api.json) — real-time
+//   2. the latest published SDK snapshot, served from the jsDelivr npm CDN —
+//      at most ~24h stale, cached on disk per day; this is the freshness path
+//      for networks where models.dev itself is unreachable but the CDN is not
+//   3. the snapshot bundled inside the installed SDK — works fully offline
+import { existsSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Models } from "@opencode-ai/models";
 import type { Model, ProviderMap } from "@opencode-ai/models";
 import { PROBE_TIMEOUT_MS } from "./types.ts";
@@ -44,22 +50,66 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 
 // Session cache — one catalog covers every provider and model.
 let catalogCache: ProviderMap | null = null;
+let catalogPromise: Promise<ProviderMap> | null = null;
+
+// jsDelivr serves the latest published SDK's snapshot.js. Same publisher and
+// content as the npm dependency itself, just fresher. Cached in the temp dir
+// per UTC day so each day costs at most one ~5MB download.
+const SNAPSHOT_CDN_URL = "https://cdn.jsdelivr.net/npm/@opencode-ai/models@latest/dist/snapshot.js";
+
+async function loadLatestSnapshot(): Promise<ProviderMap> {
+	const day = new Date().toISOString().slice(0, 10);
+	const file = join(tmpdir(), `model-probe-modelsdev-${day}.mjs`);
+	if (!existsSync(file)) {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS * 2);
+		try {
+			const response = await fetch(SNAPSHOT_CDN_URL, { headers: { "user-agent": "model-probe" }, signal: controller.signal });
+			if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+			const text = await response.text();
+			// Guard against CDN error pages; the real check is the import below.
+			if (!text.includes("providers")) throw new Error("unexpected snapshot content");
+			writeFileSync(file, text);
+			// Drop previous days' snapshots.
+			for (const old of readdirSync(tmpdir())) {
+				if (old.startsWith("model-probe-modelsdev-") && old !== `model-probe-modelsdev-${day}.mjs`) {
+					try { unlinkSync(join(tmpdir(), old)); } catch { /* best effort */ }
+				}
+			}
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+	const mod = await import(pathToFileURL(file).href);
+	const providers = (mod.providers ?? mod.default?.providers) as ProviderMap | undefined;
+	if (!providers || Object.keys(providers).length === 0) throw new Error("snapshot had no providers");
+	return providers;
+}
 
 async function loadCatalog(): Promise<ProviderMap> {
 	if (catalogCache) return catalogCache;
-	try {
-		const client = Models.make();
-		const map = await client.providers({ signal: AbortSignal.timeout(PROBE_TIMEOUT_MS * 2) });
-		if (!map || Object.keys(map).length === 0) throw new Error("models.dev returned no providers");
-		catalogCache = map;
-		return map;
-	} catch {
-		// Live API unreachable — use the SDK's bundled snapshot. Imported
-		// dynamically so the ~5MB snapshot is only parsed on this path.
+	catalogPromise ??= (async () => {
+		try {
+			const client = Models.make();
+			const map = await client.providers({ signal: AbortSignal.timeout(PROBE_TIMEOUT_MS * 2) });
+			if (!map || Object.keys(map).length === 0) throw new Error("models.dev returned no providers");
+			catalogCache = map;
+			return map;
+		} catch {
+			// Live API unreachable — try fresher snapshots before the bundled one.
+		}
+		try {
+			catalogCache = await loadLatestSnapshot();
+			return catalogCache;
+		} catch {
+			// CDN unreachable too — fall back to the SDK's bundled snapshot.
+			// Imported dynamically so the ~5MB snapshot is only parsed on this path.
+		}
 		const snapshot = await import("@opencode-ai/models/snapshot");
 		catalogCache = snapshot.providers;
 		return catalogCache;
-	}
+	})();
+	return catalogPromise;
 }
 
 function toProviderEntry(provider: { id: string; name?: string; api?: string; doc?: string; env?: string[] }): ModelsDevProvider | null {

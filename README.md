@@ -33,12 +33,14 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
 - **models.dev** — the [models.dev](https://models.dev) catalog fills any
   fields the gateway didn't report, tagged in `modelsDevFields`. Entries are
   exact per-model records, so they outrank the local rules (which are regex
-  guesses). Data comes from the official SDK (`@opencode-ai/models`): the
-  live API is tried first, and when models.dev is unreachable the snapshot
-  bundled with the SDK (at most ~24h stale) is used instead, so this tier
-  also works offline. Matched per gateway base URL against the catalog's
-  provider list, cached for the session, and never blocks a probe. Disable
-  with `profile: { modelsDev: false }`.
+  guesses). Data comes from the official SDK (`@opencode-ai/models`) with
+  three sources in order: the live API; then the latest published snapshot
+  served from the jsDelivr npm CDN (cached on disk per day — this keeps the
+  data fresh on networks where models.dev itself is unreachable); then the
+  snapshot bundled with the installed SDK, so the tier also works fully
+  offline. Matched per gateway base URL against the catalog's provider list,
+  cached for the session, and never blocks a probe. Disable with
+  `profile: { modelsDev: false }`.
 - **Defaults** — fields nothing else answered are filled from
   `MODEL_INFO_DEFAULTS` (`vision: false`, `reasoning: true`) and tagged in
   `defaultedFields`. Priority: detected > models.dev > local rule > default.

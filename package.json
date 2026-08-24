@@ -19,11 +19,11 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@opencode-ai/models": "^0.0.51"
+    "@opencode-ai/models": "^0.0.53"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/real-wudaoshi/model-probe.git"
   },
-  "version": "0.5.0"
+  "version": "0.5.1"
 }

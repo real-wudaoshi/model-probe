@@ -1,12 +1,14 @@
 // Best-effort model metadata detected while probing a gateway.
 //
-// Every field has one of four sources, highest priority first:
+// Every field has one of five sources, highest priority first:
 //   1. detected   — real data from the gateway (no tag)
 //   2. models.dev — exact per-model catalog entries (listed in modelsDevFields)
 //   3. local rule — regex guesses from the known-model table (listed in inferredFields)
-//   4. default    — filled from MODEL_INFO_DEFAULTS (listed in defaultedFields)
+//   4. api fallback — protocol-level limits when nothing else spoke (listed in defaultedFields)
+//   5. default    — filled from MODEL_INFO_DEFAULTS (listed in defaultedFields)
 export type ModelProbeInfo = {
 	contextWindow?: number;
+	maxTokens?: number; // max output tokens
 	image?: boolean; // accepts image input
 	video?: boolean; // accepts video input
 	reasoning?: boolean;
@@ -14,9 +16,9 @@ export type ModelProbeInfo = {
 	effortOptions?: string[]; // provider reasoning-effort names (none/minimal/low/.../max)
 	endpointTypes?: string[]; // New API / One API: supported_endpoint_types (chat, embeddings, ...)
 	inferred?: boolean; // at least one field was filled from the local rules
-	inferredFields?: Array<"contextWindow" | "image" | "video" | "reasoning">; // which fields came from the local rules
-	modelsDevFields?: Array<"contextWindow" | "image" | "video" | "reasoning">; // which fields came from models.dev
-	defaultedFields?: Array<"image" | "video" | "reasoning">; // which fields came from MODEL_INFO_DEFAULTS
+	inferredFields?: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning">; // which fields came from the local rules
+	modelsDevFields?: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning">; // which fields came from models.dev
+	defaultedFields?: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning">; // which fields came from the api fallback / MODEL_INFO_DEFAULTS
 };
 
 export type ProbeResult = {

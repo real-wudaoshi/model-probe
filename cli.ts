@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // model-probe CLI: probe an OpenAI-compatible gateway for models + metadata.
 //
-//   model-probe <baseUrl> [--key <apiKey>] [--ollama] [--developer-role] [--no-fallback] [--json]
+//   model-probe <baseUrl> [--key <apiKey>] [--ollama] [--api <flavor>] [--developer-role] [--no-fallback] [--json]
 //
 // Requires Node >= 22.18 (runs TypeScript natively via type stripping).
 import { applyKnownModelFallback, describeProbeInfo, detectModels, probeInfoSummary } from "./index.ts";
@@ -12,6 +12,9 @@ function usage(): never {
 Options:
   --key <apiKey>     Bearer token for the gateway
   --ollama           Use Ollama native endpoints (/api/tags, /api/show)
+  --api <flavor>     pi api flavor (openai-completions, openai-responses,
+                     anthropic-messages, google-generative-ai) — enables
+                     protocol-level fallback limits
   --developer-role   Also probe whether the gateway accepts the OpenAI
                      "developer" role (one tiny chat completion)
   --no-fallback      Do not fill gaps from the built-in known-model rules
@@ -23,6 +26,7 @@ Options:
 const args = process.argv.slice(2);
 let baseUrl: string | undefined;
 let apiKey: string | undefined;
+let api: string | undefined;
 let ollama = false;
 let developerRole = false;
 let knownModelFallback = true;
@@ -32,6 +36,7 @@ for (let i = 0; i < args.length; i++) {
 	const arg = args[i];
 	if (arg === "-h" || arg === "--help") usage();
 	else if (arg === "--key") apiKey = args[++i];
+	else if (arg === "--api") api = args[++i];
 	else if (arg === "--ollama") ollama = true;
 	else if (arg === "--developer-role") developerRole = true;
 	else if (arg === "--no-fallback") knownModelFallback = false;
@@ -46,7 +51,7 @@ for (let i = 0; i < args.length; i++) {
 if (!baseUrl) usage();
 
 try {
-	const result = await detectModels(baseUrl, { apiKey, ollama, knownModelFallback, developerRole });
+	const result = await detectModels(baseUrl, { apiKey, ollama, api, knownModelFallback, developerRole });
 
 	if (json) {
 		console.log(

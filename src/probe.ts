@@ -150,6 +150,31 @@ export async function probeModels(baseUrl: string, apiKey?: string): Promise<Pro
 	return { ids, infoById, baseUrl: resolvedBaseUrl };
 }
 
+// Protocol-level fallback limits, applied when the gateway, the catalog, and
+// the local rules all say nothing about a model's limits. Reasoning models
+// burn far more output than classic 4K-era defaults, so these follow what the
+// providers themselves document. Keyed by the pi model `api` flavor.
+export const API_FALLBACK_LIMITS: Record<string, { contextWindow: number; maxTokens: number }> = {
+	"anthropic-messages": { contextWindow: 200000, maxTokens: 32000 },
+	"google-generative-ai": { contextWindow: 1048576, maxTokens: 65536 },
+	"openai-completions": { contextWindow: 258000, maxTokens: 32000 },
+	"openai-responses": { contextWindow: 258000, maxTokens: 32000 },
+};
+
+// Community catalogs often publish degenerate limits for models whose real
+// output cap is unknown (maxTokens == contextWindow). Taken at face value that
+// squeezes the input budget to zero, so clamp the output to a conservative cap
+// and keep at least 3/4 of the window for input.
+export const MAX_OUTPUT_TOKEN_CAP = 32000;
+
+export function normalizeModelLimits(contextWindow: number, maxTokens: number): { contextWindow: number; maxTokens: number } {
+	if (contextWindow <= 0 || maxTokens < contextWindow) return { contextWindow, maxTokens };
+	return {
+		contextWindow,
+		maxTokens: Math.min(MAX_OUTPUT_TOKEN_CAP, Math.max(1, Math.floor(contextWindow / 4))),
+	};
+}
+
 // Field defaults applied when neither the gateway nor the local rules say
 // anything: reasoning on (most current models think), image and video input
 // off (opt-in). contextWindow has no default. Developer-role support is a
@@ -160,7 +185,7 @@ export const MODEL_INFO_DEFAULTS = { image: false, video: false, reasoning: true
 // defaultedFields. Detected and local-rule values always win.
 export function applyModelDefaults(info: ModelProbeInfo | undefined): ModelProbeInfo {
 	const out: ModelProbeInfo = { ...(info ?? {}) };
-	const defaulted: Array<"image" | "video" | "reasoning"> = [...(info?.defaultedFields ?? [])];
+	const defaulted: NonNullable<ModelProbeInfo["defaultedFields"]> = [...(info?.defaultedFields ?? [])];
 	if (out.image === undefined) {
 		out.image = MODEL_INFO_DEFAULTS.image;
 		defaulted.push("image");
@@ -183,7 +208,8 @@ export function probeInfoSummary(info: ModelProbeInfo | undefined): string[] {
 	if (!info) return [];
 	const defaulted = new Set(info.defaultedFields ?? []);
 	const parts: string[] = [];
-	if (info.contextWindow !== undefined) parts.push("context");
+	if (info.contextWindow !== undefined && !defaulted.has("contextWindow")) parts.push("context");
+	if (info.maxTokens !== undefined && !defaulted.has("maxTokens")) parts.push("maxTokens");
 	if (info.reasoning !== undefined && !defaulted.has("reasoning")) parts.push("reasoning");
 	if (info.image !== undefined && !defaulted.has("image")) parts.push("image");
 	if (info.video !== undefined && !defaulted.has("video")) parts.push("video");
@@ -201,10 +227,14 @@ export function describeProbeInfo(info: ModelProbeInfo | undefined): string | un
 	if (!info) return undefined;
 	const inferred = new Set(info.inferredFields ?? []);
 	const fromModelsDev = new Set(info.modelsDevFields ?? []);
-	const tag = (field: "contextWindow" | "image" | "video" | "reasoning") =>
+	const defaulted = new Set(info.defaultedFields ?? []);
+	const tag = (field: "contextWindow" | "maxTokens" | "image" | "video" | "reasoning") =>
 		inferred.has(field) ? " [local rules]" : fromModelsDev.has(field) ? " [models.dev]" : "";
 	const parts: string[] = [];
-	if (info.contextWindow !== undefined) parts.push(`ctx ${info.contextWindow}${tag("contextWindow")}`);
+	// Limit fields filled by the api fallback (tagged defaulted) carry no real
+	// information about the model — don't show them.
+	if (info.contextWindow !== undefined && !defaulted.has("contextWindow")) parts.push(`ctx ${info.contextWindow}${tag("contextWindow")}`);
+	if (info.maxTokens !== undefined && !defaulted.has("maxTokens")) parts.push(`max-out ${info.maxTokens}${tag("maxTokens")}`);
 	// Only values that differ from the defaults (image/video: false,
 	// reasoning: true) are worth showing — a model with default values gets
 	// no tag at all, even if the default was really detected (e.g. probed
@@ -228,6 +258,10 @@ function parseGatewayMetaFields(source: any, info: ModelProbeInfo): void {
 		const contextWindow = firstFiniteNumber(meta, "context_window", "max_input_tokens");
 		if (contextWindow !== undefined) info.contextWindow = contextWindow;
 	}
+	if (info.maxTokens === undefined) {
+		const maxTokens = firstFiniteNumber(meta, "max_output_tokens", "max_tokens");
+		if (maxTokens !== undefined) info.maxTokens = maxTokens;
+	}
 	const capabilities = meta.capabilities;
 	if (capabilities && typeof capabilities === "object") {
 		if (info.image === undefined && typeof capabilities.vision === "boolean") info.image = capabilities.vision;
@@ -246,6 +280,14 @@ function parseModelListItem(item: any): ModelProbeInfo | undefined {
 
 	const contextWindow = firstFiniteNumber(item, "context_length", "context_window", "max_input_tokens", "inputTokenLimit");
 	if (contextWindow !== undefined) info.contextWindow = contextWindow;
+	// OpenRouter-style: top_provider.max_completion_tokens; others publish
+	// max_output_tokens / outputTokenLimit directly.
+	const maxTokens = firstFiniteNumber(item, "max_output_tokens", "max_completion_tokens", "outputTokenLimit");
+	if (maxTokens !== undefined) info.maxTokens = maxTokens;
+	else if (typeof item.top_provider === "object" && item.top_provider !== null) {
+		const top = firstFiniteNumber(item.top_provider, "max_completion_tokens");
+		if (top !== undefined) info.maxTokens = top;
+	}
 	if (typeof item.reasoning === "boolean") info.reasoning = item.reasoning;
 
 	const modalities = Array.isArray(item.architecture?.input_modalities)
@@ -283,6 +325,8 @@ function parseOpenAIModelDetail(json: any): ModelProbeInfo | undefined {
 	// inputTokenLimit: Google's native Gemini per-model detail.
 	const contextWindow = firstFiniteNumber(json, "context_window", "inputTokenLimit");
 	if (contextWindow !== undefined) info.contextWindow = contextWindow;
+	const maxTokens = firstFiniteNumber(json, "max_output_tokens", "outputTokenLimit");
+	if (maxTokens !== undefined) info.maxTokens = maxTokens;
 
 	const capabilities = json.capabilities;
 	if (capabilities && typeof capabilities === "object") {
@@ -333,6 +377,8 @@ function parseModelGroupInfo(json: any, out: Map<string, ModelProbeInfo>): boole
 		const parsed: ModelProbeInfo = {};
 		const contextWindow = firstFiniteNumber(entry, "max_input_tokens", "context_window");
 		if (contextWindow !== undefined) parsed.contextWindow = contextWindow;
+		const maxTokens = firstFiniteNumber(entry, "max_output_tokens", "max_tokens");
+		if (maxTokens !== undefined) parsed.maxTokens = maxTokens;
 		if (typeof entry.supports_vision === "boolean") parsed.image = entry.supports_vision;
 		if (typeof entry.supports_reasoning === "boolean") parsed.reasoning = entry.supports_reasoning;
 		if (probeInfoSummary(parsed).length > 0) {
@@ -399,6 +445,8 @@ function parsePublicModelList(json: any, out: Map<string, ModelProbeInfo>): bool
 		const parsed: ModelProbeInfo = {};
 		const contextWindow = firstFiniteNumber(entry, "context_window", "contextWindow", "max_input_tokens");
 		if (contextWindow !== undefined) parsed.contextWindow = contextWindow;
+		const maxTokens = firstFiniteNumber(entry, "max_output_tokens", "maxTokens", "max_tokens");
+		if (maxTokens !== undefined) parsed.maxTokens = maxTokens;
 		// Best effort: some catalogs also publish capability flags.
 		if (typeof entry.supports_vision === "boolean") parsed.image = entry.supports_vision;
 		if (typeof entry.supports_reasoning === "boolean") parsed.reasoning = entry.supports_reasoning;
@@ -464,6 +512,8 @@ function parseLiteLLMModelInfo(json: any, out: Map<string, ModelProbeInfo>): boo
 		const parsed: ModelProbeInfo = {};
 		const contextWindow = firstFiniteNumber(info, "context_window", "max_input_tokens");
 		if (contextWindow !== undefined) parsed.contextWindow = contextWindow;
+		const maxTokens = firstFiniteNumber(info, "max_output_tokens", "max_tokens");
+		if (maxTokens !== undefined) parsed.maxTokens = maxTokens;
 		if (typeof info.supports_vision === "boolean") parsed.image = info.supports_vision;
 		if (typeof info.supports_reasoning === "boolean") parsed.reasoning = info.supports_reasoning;
 		if (probeInfoSummary(parsed).length > 0) {

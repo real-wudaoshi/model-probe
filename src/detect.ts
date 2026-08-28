@@ -2,6 +2,7 @@ import { applyKnownModelFallback } from "./known-models.ts";
 import { probeDeveloperRole } from "./developer-role.ts";
 import { fetchModelsDevInfoForBaseUrl } from "./modelsdev.ts";
 import {
+	API_FALLBACK_LIMITS,
 	applyModelDefaults,
 	enrichLiteLLMModelGroupInfo,
 	enrichLiteLLMModelInfo,
@@ -21,6 +22,9 @@ export interface DetectOptions {
 	ollama?: boolean;
 	/** Fill remaining gaps from the built-in known-model rules (default true). */
 	knownModelFallback?: boolean;
+	/** pi model api flavor (openai-completions, anthropic-messages, ...): enables
+	 * protocol-level fallback limits when no other source knows them. */
+	api?: string;
 	/** Also probe whether the gateway accepts the OpenAI "developer" role (one tiny chat completion). */
 	developerRole?: boolean;
 }
@@ -68,6 +72,7 @@ export async function fetchGatewayWideInfo(
 			}
 			const filled = { ...existing };
 			if (filled.contextWindow === undefined && info.contextWindow !== undefined) filled.contextWindow = info.contextWindow;
+			if (filled.maxTokens === undefined && info.maxTokens !== undefined) filled.maxTokens = info.maxTokens;
 			if (filled.image === undefined && info.image !== undefined) filled.image = info.image;
 			if (filled.video === undefined && info.video !== undefined) filled.video = info.video;
 			if (filled.reasoning === undefined && info.reasoning !== undefined) filled.reasoning = info.reasoning;
@@ -93,8 +98,8 @@ export async function fetchPerModelInfo(
 function applyModelsDevFallback(info: ModelProbeInfo | undefined, modelsDev: ModelProbeInfo | undefined): ModelProbeInfo | undefined {
 	if (!modelsDev) return info;
 	const out: ModelProbeInfo = { ...(info ?? {}) };
-	const tagged: Array<"contextWindow" | "image" | "video" | "reasoning"> = [...(info?.modelsDevFields ?? [])];
-	for (const field of ["contextWindow", "image", "video", "reasoning"] as const) {
+	const tagged: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning"> = [...(info?.modelsDevFields ?? [])];
+	for (const field of ["contextWindow", "maxTokens", "image", "video", "reasoning"] as const) {
 		if (out[field] === undefined && modelsDev[field] !== undefined) {
 			out[field] = modelsDev[field];
 			tagged.push(field);
@@ -106,24 +111,47 @@ function applyModelsDevFallback(info: ModelProbeInfo | undefined, modelsDev: Mod
 	return out;
 }
 
+// Protocol-level limits, below the local rules and above nothing — the last
+// word before a field stays unknown. Tagged as defaulted so callers can tell
+// it apart from real data (and don't display it as a confident label).
+function applyApiFallback(info: ModelProbeInfo, api: string | undefined): ModelProbeInfo {
+	const fallback = api ? API_FALLBACK_LIMITS[api] : undefined;
+	if (!fallback) return info;
+	const out: ModelProbeInfo = { ...info };
+	const defaulted: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning"> = [...(info.defaultedFields ?? [])];
+	if (out.contextWindow === undefined) {
+		out.contextWindow = fallback.contextWindow;
+		defaulted.push("contextWindow");
+	}
+	if (out.maxTokens === undefined) {
+		out.maxTokens = fallback.maxTokens;
+		defaulted.push("maxTokens");
+	}
+	out.defaultedFields = defaulted;
+	return out;
+}
+
 // Resolve the final metadata for one model: detected values win, then the
 // models.dev catalog (exact per-model entries), then the local rules (regex
-// guesses), then MODEL_INFO_DEFAULTS. The source of each filled field is
-// tagged (modelsDevFields / inferredFields / defaultedFields).
+// guesses, matched against normalized id candidates), then protocol-level
+// fallback limits for the given api flavor, then MODEL_INFO_DEFAULTS. The
+// source of each filled field is tagged (modelsDevFields / inferredFields /
+// defaultedFields).
 export function resolveModelInfo(
 	modelId: string,
 	info?: ModelProbeInfo,
 	modelsDev?: Map<string, ModelProbeInfo>,
+	api?: string,
 ): ModelProbeInfo {
-	return applyModelDefaults(applyKnownModelFallback(modelId, applyModelsDevFallback(info, modelsDev?.get(modelId))));
+	return applyModelDefaults(applyApiFallback(applyKnownModelFallback(modelId, applyModelsDevFallback(info, modelsDev?.get(modelId))) ?? {}, api));
 }
 
 // Merge metadata maps for `ids` (later maps win) and resolve each id through
-// models.dev + the local rules + defaults.
+// models.dev + the local rules + the api fallback + defaults.
 export function finalizeModelInfo(
 	ids: string[],
 	maps: Array<Map<string, ModelProbeInfo>>,
-	options: { modelsDev?: Map<string, ModelProbeInfo> } = {},
+	options: { modelsDev?: Map<string, ModelProbeInfo>; api?: string } = {},
 ): Map<string, ModelProbeInfo> {
 	const merged = new Map<string, ModelProbeInfo>();
 	for (const map of maps) {
@@ -132,7 +160,7 @@ export function finalizeModelInfo(
 		}
 	}
 	for (const id of ids) {
-		merged.set(id, resolveModelInfo(id, merged.get(id), options.modelsDev));
+		merged.set(id, resolveModelInfo(id, merged.get(id), options.modelsDev, options.api));
 	}
 	return merged;
 }
@@ -167,7 +195,7 @@ export async function detectModels(baseUrl: string, options: DetectOptions = {})
 	const models =
 		options.knownModelFallback === false
 			? finalizeModelInfo([], [probed.infoById, gatewayWide, details])
-			: finalizeModelInfo(probed.ids, [probed.infoById, gatewayWide, details], { modelsDev });
+			: finalizeModelInfo(probed.ids, [probed.infoById, gatewayWide, details], { modelsDev, api: options.api });
 
 	const result: DetectResult = { ...probed, models };
 	if (options.developerRole) {

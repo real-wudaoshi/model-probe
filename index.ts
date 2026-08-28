@@ -1,6 +1,7 @@
-export { applyKnownModelFallback, registerKnownModelRules, reloadKnownModelRules } from "./src/known-models.ts";
+export { applyKnownModelFallback, normalizeModelIdCandidates, registerKnownModelRules, reloadKnownModelRules } from "./src/known-models.ts";
 export type { KnownModelRule } from "./src/known-models.ts";
 export {
+	API_FALLBACK_LIMITS,
 	applyModelDefaults,
 	describeProbeInfo,
 	enrichLiteLLMModelGroupInfo,
@@ -8,7 +9,9 @@ export {
 	enrichOllamaModelDetails,
 	enrichOpenAIModelDetails,
 	enrichPublicModelInfo,
+	MAX_OUTPUT_TOKEN_CAP,
 	MODEL_INFO_DEFAULTS,
+	normalizeModelLimits,
 	probeInfoSummary,
 	probeModels,
 } from "./src/probe.ts";

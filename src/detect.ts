@@ -54,7 +54,7 @@ export async function fetchGatewayWideInfo(
 			out.set(id, info);
 		}
 	}
-	// USTC-style site catalog /api/models/public (no auth) — authoritative
+	// New API-style site catalog /api/models/public (no auth) — authoritative
 	// context_window, so its values override what LiteLLM endpoints report.
 	if (profile.publicCatalog) {
 		for (const [id, info] of await enrichPublicModelInfo(baseUrl)) {

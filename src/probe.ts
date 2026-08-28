@@ -7,14 +7,14 @@ import { buildProbeUrl, dedupe, firstFiniteNumber } from "./url.ts";
 // the probe immediately.
 class ProbeRetryable extends Error {}
 
-// Some gateways are quirky about where /models lives: USTC's LiteLLM hangs on
-// /v1/models while serving /models at the root; stock LiteLLM and many proxies
-// serve both; One API / New API only mount /v1. Try the base as given, then
-// the variant with a trailing /v1 added or removed.
+// Some gateways are quirky about where /models lives: some LiteLLM
+// deployments hang on /v1/models while serving /models at the root; stock
+// LiteLLM and many proxies serve both; One API / New API only mount /v1. Try
+// the base as given, then the variant with a trailing /v1 added or removed.
 //
-// Public hosts that don't listen on :80 at all (e.g. api.llm.ustc.edu.cn)
-// make an explicit http:// URL hang until the timeout, so for non-local http
-// URLs we additionally try the https:// variants as a fallback.
+// Public hosts that don't listen on :80 at all make an explicit http:// URL
+// hang until the timeout, so for non-local http URLs we additionally try the
+// https:// variants as a fallback.
 function isLocalHost(hostname: string): boolean {
 	const lower = hostname.toLowerCase();
 	return (
@@ -424,9 +424,10 @@ export async function enrichLiteLLMModelGroupInfo(
 	return out;
 }
 
-// USTC-style site model catalog: GET {site}/api/models/public (no auth needed)
-// returns authoritative context_window for every published model — more
-// reliable than LiteLLM's /model/info (which often has max_input_tokens null).
+// New API-style site model catalog: GET {site}/api/models/public (no auth
+// needed) returns authoritative context_window for every published model —
+// more reliable than LiteLLM's /model/info (which often has max_input_tokens
+// null).
 function parsePublicModelList(json: any, out: Map<string, ModelProbeInfo>): boolean {
 	if (!Array.isArray(json)) return false;
 	let found = false;

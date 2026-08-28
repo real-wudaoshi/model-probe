@@ -22,7 +22,7 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
   the `/models` list itself.
 - **Gateway-wide endpoints** (one call covers every model):
   - LiteLLM `GET /model/info` and `GET /model_group/info` (server root)
-  - USTC-style site catalog `GET {site}/api/models/public` (no auth)
+  - New API-style site catalog `GET {site}/api/models/public` (no auth)
 - **Per-model details** — `GET /models/{id}`, or Ollama native
   `GET /api/tags` + `POST /api/show`.
 - **Local rules** — a built-in table of well-known models (OpenAI, Anthropic,

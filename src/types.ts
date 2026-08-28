@@ -35,7 +35,7 @@ export type ProbeResult = {
  * Which extra endpoints to try when probing a gateway:
  * - `modelInfo`: LiteLLM /model/info
  * - `modelGroupInfo`: LiteLLM /model_group/info
- * - `publicCatalog`: USTC/New API style /api/models/public (on the site host)
+ * - `publicCatalog`: New API style /api/models/public (on the site host)
  * - `perModelDetails`: per-model GET /models/{id}
  * - `modelsDev`: models.dev catalog matched by base URL (sits below the local
  *   rules in priority)

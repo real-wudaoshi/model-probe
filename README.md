@@ -1,9 +1,9 @@
 # model-probe
 
 Probe OpenAI-compatible gateways for their model list and per-model metadata
-(context window, image/video input, reasoning, endpoint types). Works with LiteLLM,
-One API, New API, OpenRouter, Google's native Gemini API, Ollama, and generic
-OpenAI-compatible servers.
+(context window, image/video input, reasoning, list prices, endpoint types).
+Works with LiteLLM, One API, New API, OpenRouter, Google's native Gemini API,
+Ollama, and generic OpenAI-compatible servers.
 
 Runs on Node >= 22.18 (TypeScript type stripping, no build step).
 
@@ -58,6 +58,10 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
   `describeProbeInfo` only renders values that differ from the defaults
   (defaulted `contextWindow` / `maxTokens` are hidden too — they carry no
   real information about the model).
+- **List prices** — `cost` (USD per 1M tokens: input / output / cacheRead /
+  cacheWrite) from the gateway itself (LiteLLM `input_cost_per_token` & co.,
+  OpenRouter inline `pricing`) or the models.dev catalog. There is no local
+  rule or default for cost — a guessed price is worse than none.
 - **Developer-role probe** (opt-in) — one tiny chat completion with a
   `developer`-role message tells you whether the gateway accepts the OpenAI
   developer role. Gateways that don't (Kimi's subscription endpoint, some

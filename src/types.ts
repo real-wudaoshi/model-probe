@@ -6,18 +6,29 @@
 //   3. local rule — regex guesses from the known-model table (listed in inferredFields)
 //   4. api fallback — protocol-level limits when nothing else spoke (listed in defaultedFields)
 //   5. default    — filled from MODEL_INFO_DEFAULTS (listed in defaultedFields)
+// USD per 1M tokens — pi's ModelCostRates convention (and models.dev's).
+// No local-rule or default source: a guessed price is worse than none, so
+// cost only ever comes from the gateway itself or the models.dev catalog.
+export type ModelCostInfo = {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+};
+
 export type ModelProbeInfo = {
 	contextWindow?: number;
 	maxTokens?: number; // max output tokens
 	image?: boolean; // accepts image input
 	video?: boolean; // accepts video input
 	reasoning?: boolean;
+	cost?: ModelCostInfo; // list prices, USD per 1M tokens
 	alwaysThinking?: boolean; // reasoning exists but cannot be turned off
 	effortOptions?: string[]; // provider reasoning-effort names (none/minimal/low/.../max)
 	endpointTypes?: string[]; // New API / One API: supported_endpoint_types (chat, embeddings, ...)
 	inferred?: boolean; // at least one field was filled from the local rules
 	inferredFields?: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning">; // which fields came from the local rules
-	modelsDevFields?: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning">; // which fields came from models.dev
+	modelsDevFields?: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning" | "cost">; // which fields came from models.dev
 	defaultedFields?: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning">; // which fields came from the api fallback / MODEL_INFO_DEFAULTS
 };
 

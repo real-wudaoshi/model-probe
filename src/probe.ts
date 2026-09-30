@@ -1,5 +1,5 @@
 import { PROBE_CONCURRENCY, PROBE_TIMEOUT_MS } from "./types.ts";
-import type { ModelProbeInfo, ProbeResult } from "./types.ts";
+import type { ModelCostInfo, ModelProbeInfo, ProbeResult } from "./types.ts";
 import { buildProbeUrl, dedupe, firstFiniteNumber } from "./url.ts";
 
 // Retryable probe failure (timeout, network error, 404) — the caller retries
@@ -213,7 +213,32 @@ export function probeInfoSummary(info: ModelProbeInfo | undefined): string[] {
 	if (info.reasoning !== undefined && !defaulted.has("reasoning")) parts.push("reasoning");
 	if (info.image !== undefined && !defaulted.has("image")) parts.push("image");
 	if (info.video !== undefined && !defaulted.has("video")) parts.push("video");
+	if (info.cost !== undefined) parts.push("cost");
 	return parts;
+}
+
+// Build per-1M-token cost rates (pi / models.dev convention) from per-token
+// values (LiteLLM and OpenRouter publish per-token). Missing cache rates
+// default to 0, matching pi's builtin catalogs; an entry with neither input
+// nor output price carries no information and is skipped. Values are rounded
+// to 6 decimals so 4.4e-7 doesn't surface as 0.44000000000000006.
+function costFromPerToken(input?: number, output?: number, cacheRead?: number, cacheWrite?: number): ModelCostInfo | undefined {
+	if (input === undefined && output === undefined) return undefined;
+	const per1M = (v: number | undefined) => Math.round((v ?? 0) * 1e6 * 1e6) / 1e6;
+	return { input: per1M(input), output: per1M(output), cacheRead: per1M(cacheRead), cacheWrite: per1M(cacheWrite) };
+}
+
+// OpenRouter-style inline pricing on /models entries:
+// pricing: { prompt, completion, input_cache_read, input_cache_write } —
+// stringified USD per token.
+function parseInlinePricing(item: any): ModelCostInfo | undefined {
+	const pricing = item?.pricing;
+	if (!pricing || typeof pricing !== "object") return undefined;
+	const num = (key: string): number | undefined => {
+		const v = Number(pricing[key]);
+		return Number.isFinite(v) && pricing[key] !== undefined && pricing[key] !== null && pricing[key] !== "" ? v : undefined;
+	};
+	return costFromPerToken(num("prompt"), num("completion"), num("input_cache_read"), num("input_cache_write"));
 }
 
 // Whether a probe result carries anything worth surfacing (including gateway
@@ -228,8 +253,8 @@ export function describeProbeInfo(info: ModelProbeInfo | undefined): string | un
 	const inferred = new Set(info.inferredFields ?? []);
 	const fromModelsDev = new Set(info.modelsDevFields ?? []);
 	const defaulted = new Set(info.defaultedFields ?? []);
-	const tag = (field: "contextWindow" | "maxTokens" | "image" | "video" | "reasoning") =>
-		inferred.has(field) ? " [local rules]" : fromModelsDev.has(field) ? " [models.dev]" : "";
+	const tag = (field: "contextWindow" | "maxTokens" | "image" | "video" | "reasoning" | "cost") =>
+		inferred.has(field as any) ? " [local rules]" : fromModelsDev.has(field) ? " [models.dev]" : "";
 	const parts: string[] = [];
 	// Limit fields filled by the api fallback (tagged defaulted) carry no real
 	// information about the model — don't show them.
@@ -243,6 +268,7 @@ export function describeProbeInfo(info: ModelProbeInfo | undefined): string | un
 	if (info.video === true) parts.push(`video${tag("video")}`);
 	if (info.reasoning === false) parts.push(`no reasoning${tag("reasoning")}`);
 	else if (info.reasoning === true && info.alwaysThinking) parts.push(`reasoning (always on)${tag("reasoning")}`);
+	if (info.cost) parts.push(`$${info.cost.input}/$${info.cost.output} per 1M${tag("cost")}`);
 	if (info.endpointTypes && info.endpointTypes.length > 0) parts.push(info.endpointTypes.join("/"));
 	return parts.length > 0 ? parts.join(" • ") : undefined;
 }
@@ -311,6 +337,9 @@ function parseModelListItem(item: any): ModelProbeInfo | undefined {
 		const types = item.supported_endpoint_types.filter((t: unknown): t is string => typeof t === "string");
 		if (types.length > 0) info.endpointTypes = types;
 	}
+
+	const cost = parseInlinePricing(item);
+	if (cost) info.cost = cost;
 
 	parseGatewayMetaFields(item, info);
 
@@ -517,6 +546,14 @@ function parseLiteLLMModelInfo(json: any, out: Map<string, ModelProbeInfo>): boo
 		if (maxTokens !== undefined) parsed.maxTokens = maxTokens;
 		if (typeof info.supports_vision === "boolean") parsed.image = info.supports_vision;
 		if (typeof info.supports_reasoning === "boolean") parsed.reasoning = info.supports_reasoning;
+		// LiteLLM reports costs per token (input_cost_per_token, ...).
+		const cost = costFromPerToken(
+			firstFiniteNumber(info, "input_cost_per_token"),
+			firstFiniteNumber(info, "output_cost_per_token"),
+			firstFiniteNumber(info, "cache_read_input_token_cost"),
+			firstFiniteNumber(info, "cache_creation_input_token_cost"),
+		);
+		if (cost) parsed.cost = cost;
 		if (probeInfoSummary(parsed).length > 0) {
 			out.set(name, parsed);
 			found = true;

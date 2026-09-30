@@ -25,4 +25,4 @@ export type { ModelsDevProvider } from "./src/modelsdev.ts";
 export { detectModels, fetchGatewayWideInfo, fetchPerModelInfo, finalizeModelInfo, resolveModelInfo } from "./src/detect.ts";
 export type { DetectOptions, DetectResult } from "./src/detect.ts";
 export { FULL_PROFILE, PROBE_CONCURRENCY, PROBE_TIMEOUT_MS } from "./src/types.ts";
-export type { DetectProfile, ModelProbeInfo, ProbeResult } from "./src/types.ts";
+export type { DetectProfile, ModelCostInfo, ModelProbeInfo, ProbeResult } from "./src/types.ts";

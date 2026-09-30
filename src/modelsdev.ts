@@ -149,6 +149,23 @@ function parseModelEntry(model: Model): ModelProbeInfo | undefined {
 		info.effortOptions = effort.values.filter((v): v is string => typeof v === "string");
 	}
 
+	// Catalog list prices, already USD per 1M tokens. Missing cache rates map
+	// to 0, matching pi's builtin catalogs.
+	const cost = (model as any).cost;
+	if (cost && typeof cost === "object") {
+		const num = (v: unknown) => (Number.isFinite(v) ? (v as number) : undefined);
+		const input = num(cost.input);
+		const output = num(cost.output);
+		if (input !== undefined || output !== undefined) {
+			info.cost = {
+				input: input ?? 0,
+				output: output ?? 0,
+				cacheRead: num(cost.cache_read) ?? 0,
+				cacheWrite: num(cost.cache_write) ?? 0,
+			};
+		}
+	}
+
 	return Object.keys(info).length > 0 ? info : undefined;
 }
 

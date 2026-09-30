@@ -98,10 +98,10 @@ export async function fetchPerModelInfo(
 function applyModelsDevFallback(info: ModelProbeInfo | undefined, modelsDev: ModelProbeInfo | undefined): ModelProbeInfo | undefined {
 	if (!modelsDev) return info;
 	const out: ModelProbeInfo = { ...(info ?? {}) };
-	const tagged: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning"> = [...(info?.modelsDevFields ?? [])];
-	for (const field of ["contextWindow", "maxTokens", "image", "video", "reasoning"] as const) {
+	const tagged: NonNullable<ModelProbeInfo["modelsDevFields"]> = [...(info?.modelsDevFields ?? [])];
+	for (const field of ["contextWindow", "maxTokens", "image", "video", "reasoning", "cost"] as const) {
 		if (out[field] === undefined && modelsDev[field] !== undefined) {
-			out[field] = modelsDev[field];
+			out[field] = modelsDev[field] as any;
 			tagged.push(field);
 		}
 	}

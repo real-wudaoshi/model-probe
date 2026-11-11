@@ -189,7 +189,9 @@ export async function detectModels(baseUrl: string, options: DetectOptions = {})
 	// gateway-wide source but applied ABOVE the local rules at finalize time.
 	let modelsDev = new Map<string, ModelProbeInfo>();
 	if (profile.modelsDev) {
-		modelsDev = await fetchModelsDevInfoForBaseUrl(probed.baseUrl);
+		// Base-URL match first, then a catalog-wide lookup by id so gateways that
+		// aren't in the catalog still get real metadata for known model ids.
+		modelsDev = await fetchModelsDevInfoForBaseUrl(probed.baseUrl, probed.ids);
 	}
 
 	const models =

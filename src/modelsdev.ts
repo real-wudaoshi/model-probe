@@ -21,6 +21,7 @@ import { pathToFileURL } from "node:url";
 import { Models } from "@opencode-ai/models";
 import type { Model, ProviderMap } from "@opencode-ai/models";
 import { normalizeModelLimits } from "./probe.ts";
+import { normalizeModelIdCandidates } from "./known-models.ts";
 import { PROBE_TIMEOUT_MS } from "./types.ts";
 import type { ModelProbeInfo } from "./types.ts";
 
@@ -213,18 +214,147 @@ function sameBaseUrl(a: string, b: string): boolean {
 	}
 }
 
-// Find the models.dev provider serving this base URL and return its model
-// metadata. Empty map when nothing matches or every source is down.
-export async function fetchModelsDevInfoForBaseUrl(baseUrl: string): Promise<Map<string, ModelProbeInfo>> {
+// Catalog-wide id index. Relay gateways (api.88api.ai, ...) are not in the
+// catalog, so a base-URL match finds nothing even for a perfectly well-known
+// model id. Every catalog model is therefore indexed by id — and by the segment
+// after the last "/" for ids like "openai/gpt-6.1-sol" — and each field answers
+// with the majority value across every provider that publishes the id: resellers
+// republish the maker's numbers, so the mode is the maker's value.
+//
+// Cost is deliberately NOT taken from this tier: resellers price differently and
+// a base-URL match already supplies the real per-host pricing.
+type Vote<V> = Map<V, number>;
+
+type IdVotes = {
+	contextWindow: Vote<number>;
+	maxTokens: Vote<number>;
+	image: Vote<boolean>;
+	video: Vote<boolean>;
+	reasoning: Vote<boolean>;
+};
+
+let idIndexCache: Map<string, ModelProbeInfo> | null = null;
+
+function bump<V>(votes: Vote<V>, value: V | undefined): void {
+	if (value === undefined) return;
+	votes.set(value, (votes.get(value) ?? 0) + 1);
+}
+
+// Highest count wins; ties keep the value seen first (catalog order).
+function winner<V>(votes: Vote<V>): V | undefined {
+	let best: V | undefined;
+	let bestCount = 0;
+	for (const [value, count] of votes) {
+		if (count > bestCount) {
+			best = value;
+			bestCount = count;
+		}
+	}
+	return best;
+}
+
+function indexKeys(catalogId: string): string[] {
+	const lower = catalogId.trim().toLowerCase();
+	if (!lower) return [];
+	const keys = new Set<string>([lower]);
+	const slash = lower.lastIndexOf("/");
+	if (slash > 0 && slash < lower.length - 1) keys.add(lower.slice(slash + 1));
+	return [...keys];
+}
+
+async function getIdIndex(): Promise<Map<string, ModelProbeInfo>> {
+	if (idIndexCache) return idIndexCache;
+	const catalog = await loadCatalog();
+	const votes = new Map<string, IdVotes>();
+	for (const provider of Object.values(catalog)) {
+		const models = provider?.models;
+		if (!models || typeof models !== "object") continue;
+		for (const [catalogId, model] of Object.entries(models)) {
+			const info = parseModelEntry(model as Model);
+			if (!info) continue;
+			for (const key of indexKeys(catalogId)) {
+				let entry = votes.get(key);
+				if (!entry) {
+					entry = {
+						contextWindow: new Map(),
+						maxTokens: new Map(),
+						image: new Map(),
+						video: new Map(),
+						reasoning: new Map(),
+					};
+					votes.set(key, entry);
+				}
+				bump(entry.contextWindow, info.contextWindow);
+				bump(entry.maxTokens, info.maxTokens);
+				bump(entry.image, info.image);
+				bump(entry.video, info.video);
+				bump(entry.reasoning, info.reasoning);
+			}
+		}
+	}
+
+	const index = new Map<string, ModelProbeInfo>();
+	for (const [key, entry] of votes) {
+		const info: ModelProbeInfo = {};
+		const contextWindow = winner(entry.contextWindow);
+		const maxTokens = winner(entry.maxTokens);
+		const image = winner(entry.image);
+		const video = winner(entry.video);
+		const reasoning = winner(entry.reasoning);
+		if (contextWindow !== undefined) info.contextWindow = contextWindow;
+		if (maxTokens !== undefined) info.maxTokens = maxTokens;
+		if (image !== undefined) info.image = image;
+		if (video !== undefined) info.video = video;
+		if (reasoning !== undefined) info.reasoning = reasoning;
+		if (Object.keys(info).length > 0) index.set(key, info);
+	}
+	idIndexCache = index;
+	return index;
+}
+
+// Model metadata looked up by id across the whole catalog, for gateways the
+// catalog does not know. Ids are matched through the same normalization chain
+// the local rules use, so "bailian/gpt-6.1-sol" still finds "gpt-6.1-sol".
+export async function fetchModelsDevInfoByModelIds(ids: string[]): Promise<Map<string, ModelProbeInfo>> {
+	const out = new Map<string, ModelProbeInfo>();
+	if (ids.length === 0) return out;
+	let index: Map<string, ModelProbeInfo>;
+	try {
+		index = await getIdIndex();
+	} catch {
+		return out; // catalog unreachable — no models.dev tier
+	}
+	for (const id of ids) {
+		for (const candidate of normalizeModelIdCandidates(id)) {
+			const info = index.get(candidate);
+			if (info) {
+				out.set(id, info);
+				break;
+			}
+		}
+	}
+	return out;
+}
+
+// Model metadata for the provider serving this base URL. When `ids` is given,
+// any model the host's own catalog entry does not cover is looked up by id
+// across the whole catalog — a relay gets real metadata instead of nothing.
+export async function fetchModelsDevInfoForBaseUrl(baseUrl: string, ids?: string[]): Promise<Map<string, ModelProbeInfo>> {
+	const out = new Map<string, ModelProbeInfo>();
 	try {
 		const providers = await fetchModelsDevProviders();
 		for (const provider of providers.values()) {
 			if (sameBaseUrl(provider.baseUrl, baseUrl)) {
-				return await fetchModelsDevModels(provider.id);
+				for (const [id, info] of await fetchModelsDevModels(provider.id)) out.set(id, info);
+				break;
 			}
 		}
 	} catch {
-		// catalog unreachable — no models.dev tier
+		// catalog unreachable — try the id index alone below
 	}
-	return new Map();
+	if (ids && ids.length > 0) {
+		const byId = await fetchModelsDevInfoByModelIds(ids.filter((id) => !out.has(id)));
+		for (const [id, info] of byId) out.set(id, info);
+	}
+	return out;
 }

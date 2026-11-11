@@ -42,8 +42,16 @@ Runs on Node >= 22.18 (TypeScript type stripping, no build step).
   data fresh on networks where models.dev itself is unreachable); then the
   snapshot bundled with the installed SDK, so the tier also works fully
   offline. Matched per gateway base URL against the catalog's provider list,
-  cached for the session, and never blocks a probe. Disable with
-  `profile: { modelsDev: false }`. Degenerate catalog limits
+  then — for every model the host's own entry doesn't cover — by **model id
+  across the whole catalog**: relays that aren't in the catalog still get real
+  metadata for well-known ids (`gpt-6.1-sol` probed from an unknown gateway
+  resolves to the catalog's 1.05M context / 128K output / image input), with
+  decorated ids matched through the same normalization chain as the local
+  rules. The id tier answers per field with the majority value of every
+  provider publishing that id, and it deliberately carries **no cost** —
+  resellers price differently, so prices only come from a base-URL match or
+  from the gateway itself. Cached for the session, never blocks a probe.
+  Disable with `profile: { modelsDev: false }`. Degenerate catalog limits
   (`maxTokens == contextWindow`) are clamped by `normalizeModelLimits` to
   `min(32K, ctx/4)` before they reach callers.
 - **API fallback** — when the gateway, the catalog, and the rules all stay

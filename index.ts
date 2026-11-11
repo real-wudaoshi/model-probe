@@ -17,6 +17,7 @@ export {
 } from "./src/probe.ts";
 export { probeDeveloperRole } from "./src/developer-role.ts";
 export {
+	fetchModelsDevInfoByModelIds,
 	fetchModelsDevInfoForBaseUrl,
 	fetchModelsDevModels,
 	fetchModelsDevProviders,

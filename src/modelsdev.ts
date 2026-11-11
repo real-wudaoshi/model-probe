@@ -7,21 +7,26 @@
 // guess. Detected > models.dev > local rule > default. Fields filled from
 // here are tagged in modelsDevFields.
 //
-// Data comes from the official models.dev SDK (@opencode-ai/models), three
-// sources in order:
-//   1. live API (GET https://models.dev/api.json) — real-time
-//   2. the latest published SDK snapshot, served from the jsDelivr npm CDN —
-//      at most ~24h stale, cached on disk per day; this is the freshness path
-//      for networks where models.dev itself is unreachable but the CDN is not
-//   3. the snapshot bundled inside the installed SDK — works fully offline
-import { existsSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+// Data comes from the official models.dev SDK (@opencode-ai/models), in this
+// order:
+//   1. the last live download, cached on disk, while it is under an hour old
+//   2. the live API (GET https://models.dev/catalog.json) — then cached
+//   3. an older live download (up to a day) when the API is unreachable
+//   4. the latest published SDK snapshot from the jsDelivr npm CDN — the
+//      freshness path for networks where models.dev itself is blocked
+//   5. the snapshot bundled inside the installed SDK — works fully offline
+//
+// Everything cached is plain JSON in a per-user cache directory. The CDN
+// snapshot ships as a JavaScript module; it is parsed as data and never
+// imported, so nothing downloaded at runtime is ever executed.
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { Models } from "@opencode-ai/models";
+import { Models, ModelsDevError } from "@opencode-ai/models";
 import type { Model, ProviderMap } from "@opencode-ai/models";
-import { normalizeModelLimits } from "./probe.ts";
+import { request } from "./http.ts";
 import { normalizeModelIdCandidates } from "./known-models.ts";
+import { normalizeModelLimits } from "./probe.ts";
 import { PROBE_TIMEOUT_MS } from "./types.ts";
 import type { ModelProbeInfo } from "./types.ts";
 
@@ -31,6 +36,18 @@ export type ModelsDevProvider = {
 	baseUrl: string;
 	env: string[];
 	doc?: string;
+};
+
+/**
+ * Where the catalog in use came from. "live" and "cache" are the models.dev
+ * API itself (just downloaded / downloaded earlier on this machine); "cdn"
+ * and "bundled" are published snapshots, which can be older than data this
+ * machine has already seen.
+ */
+export type ModelsDevCatalogInfo = {
+	source: "live" | "cache" | "cdn" | "bundled";
+	/** When the data was current (ms since epoch). */
+	asOf: number;
 };
 
 // Providers whose api field is implicit (their ai-sdk package hardcodes the
@@ -50,69 +67,282 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 	aihubmix: "https://aihubmix.com/v1",
 };
 
-// Session cache — one catalog covers every provider and model.
-let catalogCache: ProviderMap | null = null;
-let catalogPromise: Promise<ProviderMap> | null = null;
+// Hosts to recognize when PROBED, although the catalog lists no OpenAI-style
+// base URL for them (native APIs, SDK-hardcoded endpoints). They only map a
+// probed base URL to its catalog table — they are deliberately not part of
+// fetchModelsDevProviders(), which lists OpenAI-compatible endpoints.
+const PROBED_HOST_ALIASES: Array<{ providerId: string; matches: (url: URL) => boolean }> = [
+	{ providerId: "google", matches: (url) => url.hostname === "generativelanguage.googleapis.com" },
+	{ providerId: "anthropic", matches: (url) => url.hostname === "api.anthropic.com" },
+	{ providerId: "vercel", matches: (url) => url.hostname === "ai-gateway.vercel.sh" },
+	{ providerId: "opencode", matches: (url) => url.hostname === "opencode.ai" && /^\/zen(\/|$)/.test(url.pathname) },
+];
 
-// jsDelivr serves the latest published SDK's snapshot.js. Same publisher and
-// content as the npm dependency itself, just fresher. Cached in the temp dir
-// per UTC day so each day costs at most one ~5MB download.
+// ---------------------------------------------------------------------------
+// Catalog loading
+// ---------------------------------------------------------------------------
+
+// Lab-published, provider-agnostic model metadata (models.dev /models.json),
+// keyed by "<lab>/<model>". Typed loosely: the shape has grown across SDK
+// releases and only a few stable fields are read.
+type LabModel = {
+	open_weights?: boolean;
+	reasoning?: boolean;
+	modalities?: { input?: unknown };
+	limit?: { context?: number; output?: number };
+};
+type LabModelMap = Record<string, LabModel>;
+
+type CatalogData = { providers: ProviderMap; models: LabModelMap; asOf: number };
+type LoadedCatalog = CatalogData & { source: ModelsDevCatalogInfo["source"] };
+
+// A live download is reused for an hour before asking again.
+const LIVE_TTL_MS = 60 * 60 * 1000;
+// After the live API failed, don't make every run wait for it again.
+const LIVE_RETRY_DELAY_MS = 10 * 60 * 1000;
+// Up to this age an earlier live download beats the daily CDN snapshot.
+const STALE_LIVE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// The CDN snapshot is republished daily.
+const CDN_TTL_MS = 12 * 60 * 60 * 1000;
+
+// jsDelivr serves the latest published SDK's snapshot.js: same publisher and
+// content as the npm dependency itself, just fresher.
 const SNAPSHOT_CDN_URL = "https://cdn.jsdelivr.net/npm/@opencode-ai/models@latest/dist/snapshot.js";
 
-async function loadLatestSnapshot(): Promise<ProviderMap> {
-	const day = new Date().toISOString().slice(0, 10);
-	const file = join(tmpdir(), `model-probe-modelsdev-${day}.mjs`);
-	if (!existsSync(file)) {
-		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS * 2);
-		try {
-			const response = await fetch(SNAPSHOT_CDN_URL, { headers: { "user-agent": "model-probe" }, signal: controller.signal });
-			if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-			const text = await response.text();
-			// Guard against CDN error pages; the real check is the import below.
-			if (!text.includes("providers")) throw new Error("unexpected snapshot content");
-			writeFileSync(file, text);
-			// Drop previous days' snapshots.
-			for (const old of readdirSync(tmpdir())) {
-				if (old.startsWith("model-probe-modelsdev-") && old !== `model-probe-modelsdev-${day}.mjs`) {
-					try { unlinkSync(join(tmpdir(), old)); } catch { /* best effort */ }
-				}
-			}
-		} finally {
-			clearTimeout(timer);
-		}
+// The catalog held in memory. A long-lived host (an editor or agent session
+// that stays open for days) asks again once the copy has aged: hourly for
+// live data, and after the retry delay when all it could get was a snapshot.
+let catalogCache: LoadedCatalog | null = null;
+let catalogLoadedAt = 0;
+let catalogPromise: Promise<LoadedCatalog> | null = null;
+let idIndexCache: Map<string, ModelProbeInfo> | null = null;
+
+function cacheDir(): string {
+	const override = process.env.MODEL_PROBE_CACHE_DIR?.trim();
+	if (override) return override;
+	if (process.platform === "win32") {
+		return join(process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "model-probe", "Cache");
 	}
-	const mod = await import(pathToFileURL(file).href);
-	const providers = (mod.providers ?? mod.default?.providers) as ProviderMap | undefined;
-	if (!providers || Object.keys(providers).length === 0) throw new Error("snapshot had no providers");
-	return providers;
+	if (process.platform === "darwin") return join(homedir(), "Library", "Caches", "model-probe");
+	return join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "model-probe");
 }
 
-async function loadCatalog(): Promise<ProviderMap> {
-	if (catalogCache) return catalogCache;
-	catalogPromise ??= (async () => {
-		try {
-			const client = Models.make();
-			const map = await client.providers({ signal: AbortSignal.timeout(PROBE_TIMEOUT_MS * 2) });
-			if (!map || Object.keys(map).length === 0) throw new Error("models.dev returned no providers");
-			catalogCache = map;
-			return map;
-		} catch {
-			// Live API unreachable — try fresher snapshots before the bundled one.
+const cacheFile = (name: "live" | "cdn") => join(cacheDir(), `modelsdev-${name}.json`);
+const liveFailureMarker = () => join(cacheDir(), "modelsdev-live.failed");
+
+function isProviderMap(value: unknown): value is ProviderMap {
+	return !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 0;
+}
+
+function readCache(name: "live" | "cdn"): (CatalogData & { savedAt: number }) | null {
+	try {
+		const parsed = JSON.parse(readFileSync(cacheFile(name), "utf8"));
+		if (!parsed || typeof parsed !== "object" || typeof parsed.savedAt !== "number" || !isProviderMap(parsed.providers)) return null;
+		return {
+			savedAt: parsed.savedAt,
+			asOf: typeof parsed.asOf === "number" ? parsed.asOf : parsed.savedAt,
+			providers: parsed.providers,
+			models: parsed.models && typeof parsed.models === "object" ? parsed.models : {},
+		};
+	} catch {
+		return null; // missing or unreadable — treated as no cache
+	}
+}
+
+// Write-then-rename, so a reader (or a run killed halfway) never sees half a file.
+function writeCache(name: "live" | "cdn", data: CatalogData, savedAt: number): void {
+	try {
+		mkdirSync(cacheDir(), { recursive: true, mode: 0o700 });
+		const file = cacheFile(name);
+		const temp = `${file}.${process.pid}.tmp`;
+		writeFileSync(temp, JSON.stringify({ savedAt, asOf: data.asOf, providers: data.providers, models: data.models }), { mode: 0o600 });
+		renameSync(temp, file);
+	} catch {
+		// Caching is an optimization; an unwritable cache directory is not an error.
+	}
+}
+
+function liveFailedRecently(now: number): boolean {
+	try {
+		return now - statSync(liveFailureMarker()).mtimeMs < LIVE_RETRY_DELAY_MS;
+	} catch {
+		return false;
+	}
+}
+
+function recordLiveFailure(failed: boolean): void {
+	try {
+		if (failed) {
+			mkdirSync(cacheDir(), { recursive: true, mode: 0o700 });
+			writeFileSync(liveFailureMarker(), "");
+		} else if (existsSync(liveFailureMarker())) {
+			unlinkSync(liveFailureMarker());
 		}
-		try {
-			catalogCache = await loadLatestSnapshot();
-			return catalogCache;
-		} catch {
-			// CDN unreachable too — fall back to the SDK's bundled snapshot.
-			// Imported dynamically so the ~5MB snapshot is only parsed on this path.
+	} catch {
+		// best effort
+	}
+}
+
+async function fetchLive(now: number): Promise<CatalogData> {
+	const client = Models.make();
+	const signal = AbortSignal.timeout(PROBE_TIMEOUT_MS * 2);
+	// catalog.json carries the provider tables and the lab metadata in one
+	// download. Where that file itself is the problem (a mirror without it),
+	// api.json still has the provider tables; when the host cannot be reached
+	// at all, a second request would only double the wait.
+	try {
+		const catalog: any = await client.catalog({ signal });
+		if (isProviderMap(catalog?.providers)) {
+			return { providers: catalog.providers, models: catalog.models && typeof catalog.models === "object" ? catalog.models : {}, asOf: now };
 		}
-		const snapshot = await import("@opencode-ai/models/snapshot");
-		catalogCache = snapshot.providers;
+	} catch (error) {
+		if (!(error instanceof ModelsDevError) || error.reason === "Transport") throw error;
+	}
+	const providers = await client.providers({ signal });
+	if (!isProviderMap(providers)) throw new Error("models.dev returned no providers");
+	return { providers, models: {}, asOf: now };
+}
+
+/**
+ * Read the SDK's snapshot module as DATA. The file is generated as
+ *   const data = JSON.parse("<json>") ... export const generatedAt = "<iso>"
+ * so the catalog is recovered by parsing that string literal twice — the
+ * module is never evaluated.
+ */
+export function parseSnapshotModule(source: string, now = Date.now()): CatalogData {
+	const call = source.indexOf("JSON.parse(");
+	const open = call === -1 ? -1 : source.indexOf('"', call);
+	if (open === -1) throw new Error("unrecognized snapshot format");
+	// Find the closing quote of the string literal, skipping escaped characters.
+	let close = -1;
+	for (let i = open + 1; i < source.length; i++) {
+		const ch = source.charCodeAt(i);
+		if (ch === 92 /* \ */) i++;
+		else if (ch === 34 /* " */) {
+			close = i;
+			break;
+		}
+	}
+	if (close === -1) throw new Error("unrecognized snapshot format");
+	const data = JSON.parse(JSON.parse(source.slice(open, close + 1)));
+	if (!isProviderMap(data?.providers)) throw new Error("snapshot had no providers");
+	const generatedAt = /generatedAt\s*=\s*"([^"]+)"/.exec(source.slice(close))?.[1];
+	const asOf = generatedAt ? Date.parse(generatedAt) : Number.NaN;
+	return {
+		providers: data.providers,
+		models: data.models && typeof data.models === "object" ? data.models : {},
+		asOf: Number.isFinite(asOf) ? asOf : now,
+	};
+}
+
+async function fetchCdnSnapshot(now: number): Promise<CatalogData> {
+	const res = await request(SNAPSHOT_CDN_URL, {
+		headers: { "user-agent": "model-probe" },
+		timeoutMs: PROBE_TIMEOUT_MS * 2,
+		bodyTimeoutMs: 30_000, // several MB
+	});
+	if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+	return parseSnapshotModule(res.body, now);
+}
+
+async function loadBundledSnapshot(): Promise<LoadedCatalog> {
+	// Imported dynamically so the multi-MB snapshot is only parsed on this path.
+	const snapshot: any = await import("@opencode-ai/models/snapshot");
+	const asOf = typeof snapshot.generatedAt === "string" ? Date.parse(snapshot.generatedAt) : Number.NaN;
+	return {
+		providers: snapshot.providers,
+		models: snapshot.models && typeof snapshot.models === "object" ? snapshot.models : {},
+		asOf: Number.isFinite(asOf) ? asOf : 0,
+		source: "bundled",
+	};
+}
+
+async function loadCatalogUncached(): Promise<LoadedCatalog> {
+	const now = Date.now();
+
+	const live = readCache("live");
+	if (live && now - live.savedAt < LIVE_TTL_MS) return { ...live, source: "cache" };
+
+	if (!liveFailedRecently(now)) {
+		try {
+			const fresh = await fetchLive(now);
+			writeCache("live", fresh, now);
+			recordLiveFailure(false);
+			return { ...fresh, source: "live" };
+		} catch {
+			// Live API unreachable — remember that, then try the fallbacks.
+			recordLiveFailure(true);
+		}
+	}
+	if (live && now - live.savedAt < STALE_LIVE_MAX_AGE_MS) return { ...live, source: "cache" };
+
+	const cdn = readCache("cdn");
+	if (cdn && now - cdn.savedAt < CDN_TTL_MS) return { ...cdn, source: "cdn" };
+	try {
+		const snapshot = await fetchCdnSnapshot(now);
+		writeCache("cdn", snapshot, now);
+		return { ...snapshot, source: "cdn" };
+	} catch {
+		// CDN unreachable too.
+	}
+
+	// Offline: whichever copy is newest — an old download or the bundled snapshot.
+	const candidates: LoadedCatalog[] = [await loadBundledSnapshot()];
+	if (live) candidates.push({ ...live, source: "cache" });
+	if (cdn) candidates.push({ ...cdn, source: "cdn" });
+	return candidates.reduce((best, candidate) => (candidate.asOf > best.asOf ? candidate : best));
+}
+
+function isLiveGrade(catalog: LoadedCatalog): boolean {
+	return catalog.source === "live" || catalog.source === "cache";
+}
+
+async function loadCatalog(): Promise<LoadedCatalog> {
+	if (catalogCache && Date.now() - catalogLoadedAt < (isLiveGrade(catalogCache) ? LIVE_TTL_MS : LIVE_RETRY_DELAY_MS)) {
 		return catalogCache;
-	})();
+	}
+	catalogPromise ??= loadCatalogUncached().then(
+		(catalog) => {
+			catalogCache = catalog;
+			catalogLoadedAt = Date.now();
+			idIndexCache = null;
+			catalogPromise = null;
+			return catalog;
+		},
+		(error) => {
+			catalogPromise = null; // let a later call try again
+			if (catalogCache) return catalogCache; // keep serving the copy we have
+			throw error;
+		},
+	);
 	return catalogPromise;
 }
+
+/**
+ * Start loading the catalog in the background, so a later lookup doesn't wait
+ * for the download. Never throws.
+ */
+export function preloadModelsDevCatalog(): void {
+	void loadCatalog().catch(() => {});
+}
+
+/** Which copy of the catalog is in use, and how current it is. */
+export async function getModelsDevCatalogInfo(): Promise<ModelsDevCatalogInfo> {
+	const catalog = await loadCatalog();
+	return { source: catalog.source, asOf: catalog.asOf };
+}
+
+/** Drop the in-memory catalog so the next lookup loads it again. */
+export function resetModelsDevCatalog(): void {
+	catalogCache = null;
+	catalogLoadedAt = 0;
+	catalogPromise = null;
+	idIndexCache = null;
+}
+
+// ---------------------------------------------------------------------------
+// Catalog entries -> ModelProbeInfo
+// ---------------------------------------------------------------------------
 
 function toProviderEntry(provider: { id: string; name?: string; api?: string; doc?: string; env?: string[] }): ModelsDevProvider | null {
 	const baseUrl = provider.api?.trim() || DEFAULT_BASE_URLS[provider.id];
@@ -126,35 +356,41 @@ function toProviderEntry(provider: { id: string; name?: string; api?: string; do
 	};
 }
 
-// Pull the fields we track out of one catalog model entry.
-function parseModelEntry(model: Model): ModelProbeInfo | undefined {
+// The fields both provider entries and lab metadata carry.
+function parseSharedFields(model: LabModel): ModelProbeInfo {
 	const info: ModelProbeInfo = {};
-
-	if (Number.isFinite(model.limit?.context) && model.limit.context > 0) info.contextWindow = model.limit.context;
-	if (Number.isFinite(model.limit?.output) && model.limit.output > 0) info.maxTokens = model.limit.output;
+	const context = model.limit?.context;
+	const output = model.limit?.output;
+	if (typeof context === "number" && Number.isFinite(context) && context > 0) info.contextWindow = context;
+	if (typeof output === "number" && Number.isFinite(output) && output > 0) info.maxTokens = output;
 	// Data hygiene: catalogs publish degenerate limits (output == context) for
 	// models whose real output cap is unknown — clamp before anyone consumes it.
 	if (info.contextWindow !== undefined && info.maxTokens !== undefined) {
-		const limited = normalizeModelLimits(info.contextWindow, info.maxTokens);
-		info.contextWindow = limited.contextWindow;
-		info.maxTokens = limited.maxTokens;
+		info.maxTokens = normalizeModelLimits(info.contextWindow, info.maxTokens).maxTokens;
 	}
-	if (Array.isArray(model.modalities?.input)) {
-		info.image = model.modalities.input.includes("image");
-		info.video = model.modalities.input.includes("video");
+	const input = model.modalities?.input;
+	if (Array.isArray(input)) {
+		info.image = input.includes("image");
+		info.video = input.includes("video");
 	}
 	if (typeof model.reasoning === "boolean") info.reasoning = model.reasoning;
+	return info;
+}
+
+// Pull the fields we track out of one provider's model entry.
+function parseModelEntry(model: Model): ModelProbeInfo | undefined {
+	const info = parseSharedFields(model as LabModel);
 
 	const effort = model.reasoning_options?.find((o) => o.type === "effort");
 	if (effort && effort.type === "effort") {
-		info.effortOptions = effort.values.filter((v): v is string => typeof v === "string");
+		info.effortOptions = effort.values.filter((v): v is Exclude<typeof v, null> => typeof v === "string");
 	}
 
 	// Catalog list prices, already USD per 1M tokens. Missing cache rates map
 	// to 0, matching pi's builtin catalogs.
 	const cost = (model as any).cost;
 	if (cost && typeof cost === "object") {
-		const num = (v: unknown) => (Number.isFinite(v) ? (v as number) : undefined);
+		const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 		const input = num(cost.input);
 		const output = num(cost.output);
 		if (input !== undefined || output !== undefined) {
@@ -170,12 +406,12 @@ function parseModelEntry(model: Model): ModelProbeInfo | undefined {
 	return Object.keys(info).length > 0 ? info : undefined;
 }
 
-// The provider catalog: id -> { baseUrl, env, ... }. Live API first, bundled
-// snapshot as fallback. Cached for the session.
+// The provider catalog: id -> { baseUrl, env, ... } for every provider with
+// an OpenAI-compatible endpoint. Cached for the session.
 export async function fetchModelsDevProviders(): Promise<Map<string, ModelsDevProvider>> {
 	const catalog = await loadCatalog();
 	const out = new Map<string, ModelsDevProvider>();
-	for (const provider of Object.values(catalog)) {
+	for (const provider of Object.values(catalog.providers)) {
 		if (!provider || typeof provider !== "object") continue;
 		const entry = toProviderEntry(provider);
 		if (entry) out.set(entry.id, entry);
@@ -184,12 +420,23 @@ export async function fetchModelsDevProviders(): Promise<Map<string, ModelsDevPr
 	return out;
 }
 
-// Model metadata for one provider, keyed by model id. Empty map when the
-// provider id is unknown.
-export async function fetchModelsDevModels(providerId: string): Promise<Map<string, ModelProbeInfo>> {
+/**
+ * Model metadata for one provider, keyed by model id. Empty map when the
+ * provider id is unknown.
+ *
+ * `requireLive` rejects instead of answering from a published snapshot (CDN
+ * or bundled). Use it before treating the table as the truth to SYNC against:
+ * a snapshot can predate what this machine already saw, so "missing from the
+ * table" would not mean "removed upstream".
+ */
+export async function fetchModelsDevModels(providerId: string, options: { requireLive?: boolean } = {}): Promise<Map<string, ModelProbeInfo>> {
 	const catalog = await loadCatalog();
+	if (options.requireLive && catalog.source !== "live" && catalog.source !== "cache") {
+		const date = catalog.asOf > 0 ? new Date(catalog.asOf).toISOString().slice(0, 10) : "an unknown date";
+		throw new Error(`models.dev is unreachable — only an offline snapshot from ${date} is available`);
+	}
 	const out = new Map<string, ModelProbeInfo>();
-	const models = catalog[providerId]?.models;
+	const models = Object.hasOwn(catalog.providers, providerId) ? catalog.providers[providerId]?.models : undefined;
 	if (models && typeof models === "object") {
 		for (const [id, model] of Object.entries(models)) {
 			const info = parseModelEntry(model);
@@ -214,15 +461,25 @@ function sameBaseUrl(a: string, b: string): boolean {
 	}
 }
 
-// Catalog-wide id index. Relay gateways (api.88api.ai, ...) are not in the
-// catalog, so a base-URL match finds nothing even for a perfectly well-known
-// model id. Every catalog model is therefore indexed by id — and by the segment
-// after the last "/" for ids like "openai/gpt-6.1-sol" — and each field answers
-// with the majority value across every provider that publishes the id: resellers
-// republish the maker's numbers, so the mode is the maker's value.
+// ---------------------------------------------------------------------------
+// Catalog-wide id index
+// ---------------------------------------------------------------------------
+
+// Relay gateways (api.88api.ai, ...) are not in the catalog, so a base-URL
+// match finds nothing even for a perfectly well-known model id. Every catalog
+// model is therefore indexed by id — and by the segment after the last "/" for
+// ids like "openai/gpt-6.1-sol". What an id resolves to:
 //
-// Cost is deliberately NOT taken from this tier: resellers price differently and
-// a base-URL match already supplies the real per-host pricing.
+//   - a proprietary model: the numbers its maker published (models.dev's lab
+//     metadata, reached through the entries' canonical_model_id). A relay
+//     resells the maker's API, so those are the numbers that apply.
+//   - an open-weights model, or an id the labs don't list: per field, the
+//     value most providers publish. Every host runs open weights with its own
+//     limits, so the common value is a better guess than the architecture's
+//     theoretical maximum.
+//
+// Cost is deliberately NOT taken from this tier: resellers price differently
+// and a base-URL match already supplies the real per-host pricing.
 type Vote<V> = Map<V, number>;
 
 type IdVotes = {
@@ -231,9 +488,8 @@ type IdVotes = {
 	image: Vote<boolean>;
 	video: Vote<boolean>;
 	reasoning: Vote<boolean>;
+	canonical: Vote<string>;
 };
-
-let idIndexCache: Map<string, ModelProbeInfo> | null = null;
 
 function bump<V>(votes: Vote<V>, value: V | undefined): void {
 	if (value === undefined) return;
@@ -265,23 +521,20 @@ function indexKeys(catalogId: string): string[] {
 async function getIdIndex(): Promise<Map<string, ModelProbeInfo>> {
 	if (idIndexCache) return idIndexCache;
 	const catalog = await loadCatalog();
+	const labModels = catalog.models;
+
 	const votes = new Map<string, IdVotes>();
-	for (const provider of Object.values(catalog)) {
+	for (const provider of Object.values(catalog.providers)) {
 		const models = provider?.models;
 		if (!models || typeof models !== "object") continue;
 		for (const [catalogId, model] of Object.entries(models)) {
 			const info = parseModelEntry(model as Model);
 			if (!info) continue;
+			const canonical = (model as any).canonical_model_id;
 			for (const key of indexKeys(catalogId)) {
 				let entry = votes.get(key);
 				if (!entry) {
-					entry = {
-						contextWindow: new Map(),
-						maxTokens: new Map(),
-						image: new Map(),
-						video: new Map(),
-						reasoning: new Map(),
-					};
+					entry = { contextWindow: new Map(), maxTokens: new Map(), image: new Map(), video: new Map(), reasoning: new Map(), canonical: new Map() };
 					votes.set(key, entry);
 				}
 				bump(entry.contextWindow, info.contextWindow);
@@ -289,23 +542,43 @@ async function getIdIndex(): Promise<Map<string, ModelProbeInfo>> {
 				bump(entry.image, info.image);
 				bump(entry.video, info.video);
 				bump(entry.reasoning, info.reasoning);
+				if (typeof canonical === "string" && Object.hasOwn(labModels, canonical)) bump(entry.canonical, canonical);
 			}
 		}
 	}
 
+	// Lab models reachable by their own name, for ids no provider entry points at.
+	const labByKey = new Map<string, string>();
+	for (const labId of Object.keys(labModels)) {
+		for (const key of indexKeys(labId)) if (!labByKey.has(key)) labByKey.set(key, labId);
+	}
+
 	const index = new Map<string, ModelProbeInfo>();
-	for (const [key, entry] of votes) {
-		const info: ModelProbeInfo = {};
-		const contextWindow = winner(entry.contextWindow);
-		const maxTokens = winner(entry.maxTokens);
-		const image = winner(entry.image);
-		const video = winner(entry.video);
-		const reasoning = winner(entry.reasoning);
-		if (contextWindow !== undefined) info.contextWindow = contextWindow;
-		if (maxTokens !== undefined) info.maxTokens = maxTokens;
-		if (image !== undefined) info.image = image;
-		if (video !== undefined) info.video = video;
-		if (reasoning !== undefined) info.reasoning = reasoning;
+	for (const key of new Set([...votes.keys(), ...labByKey.keys()])) {
+		const entry = votes.get(key);
+		const voted: ModelProbeInfo = {};
+		if (entry) {
+			const contextWindow = winner(entry.contextWindow);
+			const maxTokens = winner(entry.maxTokens);
+			const image = winner(entry.image);
+			const video = winner(entry.video);
+			const reasoning = winner(entry.reasoning);
+			if (contextWindow !== undefined) voted.contextWindow = contextWindow;
+			if (maxTokens !== undefined) voted.maxTokens = maxTokens;
+			if (image !== undefined) voted.image = image;
+			if (video !== undefined) voted.video = video;
+			if (reasoning !== undefined) voted.reasoning = reasoning;
+		}
+
+		const labId = (entry ? winner(entry.canonical) : undefined) ?? labByKey.get(key);
+		const lab = labId ? labModels[labId] : undefined;
+		const published = lab && typeof lab === "object" ? parseSharedFields(lab) : {};
+		const info: ModelProbeInfo = lab && lab.open_weights !== true ? { ...voted, ...published } : { ...published, ...voted };
+
+		// The two limits can now come from different sources — keep them coherent.
+		if (info.contextWindow !== undefined && info.maxTokens !== undefined) {
+			info.maxTokens = normalizeModelLimits(info.contextWindow, info.maxTokens).maxTokens;
+		}
 		if (Object.keys(info).length > 0) index.set(key, info);
 	}
 	idIndexCache = index;
@@ -336,18 +609,29 @@ export async function fetchModelsDevInfoByModelIds(ids: string[]): Promise<Map<s
 	return out;
 }
 
+// The catalog provider serving a probed base URL, if any.
+async function providerIdForBaseUrl(baseUrl: string): Promise<string | undefined> {
+	const providers = await fetchModelsDevProviders();
+	for (const provider of providers.values()) {
+		if (sameBaseUrl(provider.baseUrl, baseUrl)) return provider.id;
+	}
+	try {
+		const url = new URL(baseUrl);
+		return PROBED_HOST_ALIASES.find((alias) => alias.matches(url))?.providerId;
+	} catch {
+		return undefined;
+	}
+}
+
 // Model metadata for the provider serving this base URL. When `ids` is given,
 // any model the host's own catalog entry does not cover is looked up by id
 // across the whole catalog — a relay gets real metadata instead of nothing.
 export async function fetchModelsDevInfoForBaseUrl(baseUrl: string, ids?: string[]): Promise<Map<string, ModelProbeInfo>> {
 	const out = new Map<string, ModelProbeInfo>();
 	try {
-		const providers = await fetchModelsDevProviders();
-		for (const provider of providers.values()) {
-			if (sameBaseUrl(provider.baseUrl, baseUrl)) {
-				for (const [id, info] of await fetchModelsDevModels(provider.id)) out.set(id, info);
-				break;
-			}
+		const providerId = await providerIdForBaseUrl(baseUrl);
+		if (providerId) {
+			for (const [id, info] of await fetchModelsDevModels(providerId)) out.set(id, info);
 		}
 	} catch {
 		// catalog unreachable — try the id index alone below

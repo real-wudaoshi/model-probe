@@ -1,0 +1,367 @@
+{
+	"source": "https://ai-gateway.vercel.sh/v1/models",
+	"captured": "2026-11-11",
+	"note": "Trimmed sample of a real response: a few entries, long strings shortened.",
+	"payload": {
+		"object": "list",
+		"data": [
+			{
+				"id": "anthropic/claude-sonnet-4.5",
+				"object": "model",
+				"created": 1755815280,
+				"released": 1759104000,
+				"owned_by": "anthropic",
+				"name": "Claude Sonnet 4.5",
+				"description": "Claude Sonnet 4.5 is the newest model in the Sonnet series, offering improvem...",
+				"context_window": 1000000,
+				"max_tokens": 64000,
+				"type": "language",
+				"zdr": "all",
+				"no_training": "all",
+				"tags": [
+					"explicit-caching",
+					"file-input",
+					"reasoning",
+					"tool-use",
+					"vision",
+					"web-search",
+					"structured-output"
+				],
+				"regions": [
+					"eu",
+					"us"
+				],
+				"supported_specifications": [
+					"v2",
+					"v3",
+					"v4"
+				],
+				"modalities": {
+					"input": [
+						"text",
+						"image",
+						"pdf"
+					],
+					"output": [
+						"text"
+					]
+				},
+				"supported_parameters": [
+					"max_tokens",
+					"temperature",
+					"stop",
+					"tools",
+					"tool_choice",
+					"reasoning",
+					"include_reasoning",
+					"response_format",
+					"structured_outputs"
+				],
+				"temperature": true,
+				"reasoning_options": [
+					{
+						"type": "toggle"
+					},
+					{
+						"type": "budget_tokens",
+						"min": 1024
+					}
+				],
+				"knowledge": "2025-07-31",
+				"pricing": {
+					"input": "0.000003",
+					"input_tiers": [
+						{
+							"cost": "0.000003",
+							"min": 0,
+							"max": 200001
+						},
+						{
+							"cost": "0.000006",
+							"min": 200001
+						}
+					],
+					"output": "0.000015",
+					"output_tiers": [
+						{
+							"cost": "0.000015",
+							"min": 0,
+							"max": 200001
+						},
+						{
+							"cost": "0.0000225",
+							"min": 200001
+						}
+					],
+					"input_cache_read": "0.0000003",
+					"input_cache_read_tiers": [
+						{
+							"cost": "0.0000003",
+							"min": 0,
+							"max": 200001
+						},
+						{
+							"cost": "0.0000006",
+							"min": 200001
+						}
+					],
+					"input_cache_write": "0.00000375",
+					"input_cache_write_tiers": [
+						{
+							"cost": "0.00000375",
+							"min": 0,
+							"max": 200001
+						},
+						{
+							"cost": "0.0000075",
+							"min": 200001
+						}
+					],
+					"web_search": "10",
+					"regional": {
+						"eu": {
+							"input": "0.0000033",
+							"input_tiers": [
+								{
+									"cost": "0.0000033",
+									"min": 0,
+									"max": 200001
+								},
+								{
+									"cost": "0.0000066",
+									"min": 200001
+								}
+							],
+							"output": "0.0000165",
+							"output_tiers": [
+								{
+									"cost": "0.0000165",
+									"min": 0,
+									"max": 200001
+								},
+								{
+									"cost": "0.00002475",
+									"min": 200001
+								}
+							],
+							"input_cache_read": "0.00000033",
+							"input_cache_read_tiers": [
+								{
+									"cost": "0.00000033",
+									"min": 0,
+									"max": 200001
+								},
+								{
+									"cost": "0.00000066",
+									"min": 200001
+								}
+							],
+							"input_cache_write": "0.000004125",
+							"input_cache_write_tiers": [
+								{
+									"cost": "0.000004125",
+									"min": 0,
+									"max": 200001
+								},
+								{
+									"cost": "0.00000825",
+									"min": 200001
+								}
+							]
+						},
+						"us": {
+							"input": "0.0000033",
+							"input_tiers": [
+								{
+									"cost": "0.0000033",
+									"min": 0,
+									"max": 200001
+								},
+								{
+									"cost": "0.0000066",
+									"min": 200001
+								}
+							],
+							"output": "0.0000165",
+							"output_tiers": [
+								{
+									"cost": "0.0000165",
+									"min": 0,
+									"max": 200001
+								},
+								{
+									"cost": "0.00002475",
+									"min": 200001
+								}
+							],
+							"input_cache_read": "0.00000033",
+							"input_cache_read_tiers": [
+								{
+									"cost": "0.00000033",
+									"min": 0,
+									"max": 200001
+								},
+								{
+									"cost": "0.00000066",
+									"min": 200001
+								}
+							],
+							"input_cache_write": "0.000004125",
+							"input_cache_write_tiers": [
+								{
+									"cost": "0.000004125",
+									"min": 0,
+									"max": 200001
+								},
+								{
+									"cost": "0.00000825",
+									"min": 200001
+								}
+							]
+						}
+					}
+				}
+			},
+			{
+				"id": "alibaba/qwen-3-235b",
+				"object": "model",
+				"created": 1755815280,
+				"released": 1745798400,
+				"owned_by": "alibaba",
+				"name": "Qwen3 235B A22B",
+				"description": "",
+				"context_window": 262144,
+				"max_tokens": 16384,
+				"type": "language",
+				"zdr": "all",
+				"no_training": "all",
+				"tags": [
+					"tool-use",
+					"structured-output",
+					"open-weights"
+				],
+				"supported_specifications": [
+					"v2",
+					"v3",
+					"v4"
+				],
+				"modalities": {
+					"input": [
+						"text"
+					],
+					"output": [
+						"text"
+					]
+				},
+				"supported_parameters": [
+					"max_tokens",
+					"temperature",
+					"stop",
+					"tools",
+					"tool_choice",
+					"response_format",
+					"structured_outputs"
+				],
+				"temperature": true,
+				"knowledge": "2025-04",
+				"pricing": {
+					"input": "0.00000022",
+					"output": "0.00000088"
+				}
+			},
+			{
+				"id": "alibaba/qwen3-embedding-0.6b",
+				"object": "model",
+				"created": 1755815280,
+				"released": 1763078400,
+				"owned_by": "alibaba",
+				"name": "Qwen3 Embedding 0.6B",
+				"description": "The Qwen3 Embedding model series is the latest proprietary model of the Qwen ...",
+				"context_window": 32768,
+				"max_tokens": 32768,
+				"type": "embedding",
+				"zdr": "none",
+				"no_training": "all",
+				"tags": [
+					"open-weights"
+				],
+				"supported_specifications": [
+					"v2",
+					"v3",
+					"v4"
+				],
+				"modalities": {
+					"input": [
+						"text"
+					],
+					"output": [
+						"text"
+					]
+				},
+				"pricing": {
+					"input": "0.00000001"
+				}
+			},
+			{
+				"id": "alibaba/qwen3.6-35b-a3b",
+				"object": "model",
+				"created": 1755815280,
+				"released": 1777248000,
+				"owned_by": "alibaba",
+				"name": "Qwen 3.6 35B A3B",
+				"description": "Qwen 3.6 35B A3B is a mixture-of-experts model with 35 billion total paramete...",
+				"context_window": 262144,
+				"max_tokens": 65536,
+				"type": "language",
+				"zdr": "all",
+				"no_training": "all",
+				"tags": [
+					"reasoning",
+					"structured-output",
+					"tool-use",
+					"video-input",
+					"vision",
+					"open-weights",
+					"implicit-caching"
+				],
+				"supported_specifications": [
+					"v2",
+					"v3",
+					"v4"
+				],
+				"modalities": {
+					"input": [
+						"text",
+						"image",
+						"video"
+					],
+					"output": [
+						"text"
+					]
+				},
+				"supported_parameters": [
+					"max_tokens",
+					"temperature",
+					"stop",
+					"tools",
+					"tool_choice",
+					"reasoning",
+					"include_reasoning",
+					"response_format",
+					"structured_outputs"
+				],
+				"temperature": true,
+				"reasoning_options": [
+					{
+						"type": "toggle"
+					}
+				],
+				"pricing": {
+					"input": "0.000000375",
+					"output": "0.00000225",
+					"varies_by_provider": true
+				}
+			}
+		]
+	}
+}

@@ -1,0 +1,59 @@
+{
+	"source": "https://api.deepinfra.com/v1/openai/models",
+	"captured": "2026-11-11",
+	"note": "Trimmed sample of a real response: a few entries, long strings shortened.",
+	"payload": {
+		"object": "list",
+		"data": [
+			{
+				"id": "anthropic/claude-fable-5",
+				"object": "model",
+				"created": 0,
+				"owned_by": "deepinfra",
+				"root": "anthropic/claude-fable-5",
+				"parent": null,
+				"metadata": {
+					"description": "Claude Fable 5 is Anthropic's next generation of intelligence for the hardest...",
+					"context_length": 1000000,
+					"max_tokens": 1000000,
+					"pricing": {
+						"input_tokens": 10,
+						"output_tokens": 50
+					},
+					"discount": null,
+					"tags": [
+						"chat",
+						"vlm",
+						"vision",
+						"reasoning_effort",
+						"reasoning"
+					],
+					"default_width": null,
+					"default_height": null,
+					"default_iterations": null
+				}
+			},
+			{
+				"id": "Pixverse/Pixverse-T2V",
+				"object": "model",
+				"created": 0,
+				"owned_by": "deepinfra",
+				"root": "Pixverse/Pixverse-T2V",
+				"parent": null,
+				"metadata": {
+					"description": "PixVerse's 720p resolution offers a fast and reliable option for generating s...",
+					"context_length": null,
+					"max_tokens": null,
+					"pricing": {},
+					"discount": null,
+					"tags": [
+						"video-gen"
+					],
+					"default_width": null,
+					"default_height": null,
+					"default_iterations": null
+				}
+			}
+		]
+	}
+}

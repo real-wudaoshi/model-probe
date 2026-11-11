@@ -1,6 +1,6 @@
-import { applyKnownModelFallback } from "./known-models.ts";
-import { probeDeveloperRole } from "./developer-role.ts";
-import { fetchModelsDevInfoForBaseUrl } from "./modelsdev.ts";
+import { applyKnownModelFallback, applyModelIdHints } from "./known-models.ts";
+import { chatModelCandidates, probeDeveloperRole } from "./developer-role.ts";
+import { fetchModelsDevInfoForBaseUrl, preloadModelsDevCatalog } from "./modelsdev.ts";
 import {
 	API_FALLBACK_LIMITS,
 	applyModelDefaults,
@@ -9,6 +9,7 @@ import {
 	enrichOllamaModelDetails,
 	enrichOpenAIModelDetails,
 	enrichPublicModelInfo,
+	normalizeModelLimits,
 	probeModels,
 } from "./probe.ts";
 import { FULL_PROFILE } from "./types.ts";
@@ -20,7 +21,11 @@ export interface DetectOptions {
 	profile?: DetectProfile;
 	/** Use Ollama native endpoints (/api/tags, /api/show) instead of OpenAI per-model details. */
 	ollama?: boolean;
-	/** Fill remaining gaps from the built-in known-model rules (default true). */
+	/**
+	 * Fill what the gateway did not report from models.dev, the built-in
+	 * known-model rules, the api fallback and the defaults (default true).
+	 * With false, `models` holds only what the gateway itself reported.
+	 */
 	knownModelFallback?: boolean;
 	/** pi model api flavor (openai-completions, anthropic-messages, ...): enables
 	 * protocol-level fallback limits when no other source knows them. */
@@ -30,13 +35,17 @@ export interface DetectOptions {
 }
 
 export interface DetectResult extends ProbeResult {
-	/** Final per-model metadata: inline list fields + gateway-wide + per-model + models.dev + local rules. */
+	/** Final per-model metadata for every id in `ids`: inline list fields + gateway-wide + per-model + models.dev + local rules. */
 	models: Map<string, ModelProbeInfo>;
 	/** Developer-role support (probed value, or the default false), when requested via DetectOptions.developerRole. */
 	supportsDeveloperRole?: boolean;
 	/** Where supportsDeveloperRole came from: a real probe, or the default. */
 	developerRoleSource?: "detected" | "default";
 }
+
+type TaggedField = "contextWindow" | "maxTokens" | "image" | "video" | "reasoning";
+
+const NO_INFO: Map<string, ModelProbeInfo> = new Map();
 
 // Gateway-wide metadata sources: each answers for EVERY model in a single
 // call (LiteLLM /model/info, /model_group/info, the site public catalog).
@@ -49,47 +58,50 @@ export async function fetchGatewayWideInfo(
 	if (options.ollama) return out;
 	const profile = { ...FULL_PROFILE, ...options.profile };
 
-	if (profile.modelInfo) {
-		for (const [id, info] of await enrichLiteLLMModelInfo(baseUrl, options.apiKey)) {
-			out.set(id, info);
-		}
-	}
+	// Independent endpoints — ask them at the same time, merge in a fixed order.
+	const [modelInfo, publicCatalog, modelGroupInfo] = await Promise.all([
+		profile.modelInfo ? enrichLiteLLMModelInfo(baseUrl, options.apiKey) : NO_INFO,
+		profile.publicCatalog ? enrichPublicModelInfo(baseUrl) : NO_INFO,
+		profile.modelGroupInfo ? enrichLiteLLMModelGroupInfo(baseUrl, options.apiKey) : NO_INFO,
+	]);
+
+	for (const [id, info] of modelInfo) out.set(id, info);
 	// New API-style site catalog /api/models/public (no auth) — authoritative
 	// context_window, so its values override what LiteLLM endpoints report.
-	if (profile.publicCatalog) {
-		for (const [id, info] of await enrichPublicModelInfo(baseUrl)) {
-			out.set(id, { ...(out.get(id) ?? {}), ...info });
-		}
-	}
+	for (const [id, info] of publicCatalog) out.set(id, { ...(out.get(id) ?? {}), ...info });
 	// LiteLLM /model_group/info (server root, requires api key) — fills gaps the
 	// standard probes missed (e.g. when /model/info needs admin auth).
-	if (profile.modelGroupInfo) {
-		for (const [id, info] of await enrichLiteLLMModelGroupInfo(baseUrl, options.apiKey)) {
-			const existing = out.get(id);
-			if (!existing) {
-				out.set(id, info);
-				continue;
-			}
-			const filled = { ...existing };
-			if (filled.contextWindow === undefined && info.contextWindow !== undefined) filled.contextWindow = info.contextWindow;
-			if (filled.maxTokens === undefined && info.maxTokens !== undefined) filled.maxTokens = info.maxTokens;
-			if (filled.image === undefined && info.image !== undefined) filled.image = info.image;
-			if (filled.video === undefined && info.video !== undefined) filled.video = info.video;
-			if (filled.reasoning === undefined && info.reasoning !== undefined) filled.reasoning = info.reasoning;
-			out.set(id, filled);
+	for (const [id, info] of modelGroupInfo) {
+		const existing = out.get(id);
+		if (!existing) {
+			out.set(id, info);
+			continue;
 		}
+		const filled = { ...existing };
+		if (filled.contextWindow === undefined && info.contextWindow !== undefined) filled.contextWindow = info.contextWindow;
+		if (filled.maxTokens === undefined && info.maxTokens !== undefined) filled.maxTokens = info.maxTokens;
+		if (filled.image === undefined && info.image !== undefined) filled.image = info.image;
+		if (filled.video === undefined && info.video !== undefined) filled.video = info.video;
+		if (filled.reasoning === undefined && info.reasoning !== undefined) filled.reasoning = info.reasoning;
+		out.set(id, filled);
 	}
 	return out;
 }
 
-// Per-model metadata: Ollama native endpoints, or GET /models/{id}.
+/**
+ * Per-model metadata: Ollama native endpoints, or GET /models/{id}.
+ *
+ * `known` (optional) is the metadata already in hand per model, e.g. the
+ * inline fields of the /models list. It lets the probe give up early on
+ * gateways whose detail objects merely repeat the list.
+ */
 export async function fetchPerModelInfo(
 	baseUrl: string,
 	ids: string[],
-	options: { apiKey?: string; ollama?: boolean } = {},
+	options: { apiKey?: string; ollama?: boolean; known?: Map<string, ModelProbeInfo> } = {},
 ): Promise<Map<string, ModelProbeInfo>> {
 	if (options.ollama) return enrichOllamaModelDetails(baseUrl, options.apiKey, ids);
-	return enrichOpenAIModelDetails(baseUrl, options.apiKey, ids);
+	return enrichOpenAIModelDetails(baseUrl, options.apiKey, ids, options.known);
 }
 
 // Fill still-unknown fields from the models.dev catalog (matched by base URL
@@ -114,24 +126,57 @@ function applyModelsDevFallback(info: ModelProbeInfo | undefined, modelsDev: Mod
 // Protocol-level limits, below the local rules and above nothing — the last
 // word before a field stays unknown. Tagged as defaulted so callers can tell
 // it apart from real data (and don't display it as a confident label).
+//
+// The output fallback never takes more than a quarter of a window that IS
+// known: a 32K default on a model with a 16K context would be nonsense.
 function applyApiFallback(info: ModelProbeInfo, api: string | undefined): ModelProbeInfo {
-	const fallback = api ? API_FALLBACK_LIMITS[api] : undefined;
+	const fallback = api && Object.hasOwn(API_FALLBACK_LIMITS, api) ? API_FALLBACK_LIMITS[api] : undefined;
 	if (!fallback) return info;
 	const out: ModelProbeInfo = { ...info };
-	const defaulted: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning"> = [...(info.defaultedFields ?? [])];
+	const defaulted: TaggedField[] = [...(info.defaultedFields ?? [])];
 	if (out.contextWindow === undefined) {
 		out.contextWindow = fallback.contextWindow;
 		defaulted.push("contextWindow");
 	}
 	if (out.maxTokens === undefined) {
-		out.maxTokens = fallback.maxTokens;
+		out.maxTokens = Math.min(fallback.maxTokens, Math.max(1, Math.floor(out.contextWindow / 4)));
 		defaulted.push("maxTokens");
 	}
-	out.defaultedFields = defaulted;
+	if (defaulted.length > 0) out.defaultedFields = defaulted;
 	return out;
 }
 
-// Resolve the final metadata for one model: detected values win, then the
+// The two limits are resolved independently and can come from different
+// sources: a context window the gateway reported next to an output cap from
+// the catalog or a rule. When such a borrowed output cap does not even fit in
+// the window, it describes some other deployment — replace it with a
+// conservative share of the real window and stop presenting it as sourced data.
+function reconcileLimits(info: ModelProbeInfo): ModelProbeInfo {
+	if (info.contextWindow === undefined || info.maxTokens === undefined || info.maxTokens < info.contextWindow) return info;
+	const fromModelsDev = info.modelsDevFields?.includes("maxTokens") ?? false;
+	const fromRules = info.inferredFields?.includes("maxTokens") ?? false;
+	const defaulted = info.defaultedFields?.includes("maxTokens") ?? false;
+	// A cap the gateway itself reported stands as reported.
+	if (!fromModelsDev && !fromRules && !defaulted) return info;
+
+	const out: ModelProbeInfo = { ...info, maxTokens: normalizeModelLimits(info.contextWindow, info.maxTokens).maxTokens };
+	if (fromModelsDev) out.modelsDevFields = info.modelsDevFields!.filter((field) => field !== "maxTokens");
+	if (fromRules) {
+		const remaining = info.inferredFields!.filter((field) => field !== "maxTokens");
+		if (remaining.length > 0) {
+			out.inferredFields = remaining;
+		} else {
+			delete out.inferredFields;
+			delete out.inferred;
+		}
+	}
+	if (out.modelsDevFields?.length === 0) delete out.modelsDevFields;
+	if (!defaulted) out.defaultedFields = [...(info.defaultedFields ?? []), "maxTokens"];
+	return out;
+}
+
+// Resolve the final metadata for one model: detected values win, then a
+// context window spelled out in the id itself ("...[1m]"), then the
 // models.dev catalog (exact per-model entries), then the local rules (regex
 // guesses, matched against normalized id candidates), then protocol-level
 // fallback limits for the given api flavor, then MODEL_INFO_DEFAULTS. The
@@ -143,7 +188,10 @@ export function resolveModelInfo(
 	modelsDev?: Map<string, ModelProbeInfo>,
 	api?: string,
 ): ModelProbeInfo {
-	return applyModelDefaults(applyApiFallback(applyKnownModelFallback(modelId, applyModelsDevFallback(info, modelsDev?.get(modelId))) ?? {}, api));
+	const hinted = applyModelIdHints(modelId, info);
+	const fromCatalog = applyModelsDevFallback(hinted, modelsDev?.get(modelId));
+	const fromRules = applyKnownModelFallback(modelId, fromCatalog) ?? {};
+	return applyModelDefaults(reconcileLimits(applyApiFallback(fromRules, api)));
 }
 
 // Merge metadata maps for `ids` (later maps win) and resolve each id through
@@ -168,40 +216,46 @@ export function finalizeModelInfo(
 /**
  * Full detection: probe /models (with ±/v1 adaptation), then gather metadata
  * from gateway-wide endpoints, then per-model details for anything still
- * unknown, and finally the built-in known-model rules.
+ * unknown, and finally models.dev and the built-in known-model rules.
  */
 export async function detectModels(baseUrl: string, options: DetectOptions = {}): Promise<DetectResult> {
 	const profile = { ...FULL_PROFILE, ...options.profile };
+	const fillGaps = options.knownModelFallback !== false;
+	const useModelsDev = fillGaps && profile.modelsDev;
+	// The catalog is a multi-MB download: start it now so it overlaps the probing.
+	if (useModelsDev) preloadModelsDevCatalog();
+
 	const probed = await probeModels(baseUrl, options.apiKey);
 
 	const gatewayWide = await fetchGatewayWideInfo(probed.baseUrl, { apiKey: options.apiKey, profile, ollama: options.ollama });
 
-	// Per-model details. Skipped when a gateway-wide source already answered for
-	// everything (LiteLLM's /models/{id} has no metadata).
+	// Per-model details, for the models no gateway-wide source described
+	// (LiteLLM's /models/{id} has no metadata, so those are not asked twice).
 	let details = new Map<string, ModelProbeInfo>();
 	if (options.ollama) {
 		details = await fetchPerModelInfo(probed.baseUrl, probed.ids, { apiKey: options.apiKey, ollama: true });
-	} else if (profile.perModelDetails && gatewayWide.size === 0) {
-		details = await fetchPerModelInfo(probed.baseUrl, probed.ids, { apiKey: options.apiKey });
+	} else if (profile.perModelDetails) {
+		const pending = probed.ids.filter((id) => !gatewayWide.has(id));
+		if (pending.length > 0) details = await fetchPerModelInfo(probed.baseUrl, pending, { apiKey: options.apiKey, known: probed.infoById });
 	}
 
-	// models.dev catalog, matched to the probed base URL. Fetched like a
-	// gateway-wide source but applied ABOVE the local rules at finalize time.
-	let modelsDev = new Map<string, ModelProbeInfo>();
-	if (profile.modelsDev) {
-		// Base-URL match first, then a catalog-wide lookup by id so gateways that
-		// aren't in the catalog still get real metadata for known model ids.
-		modelsDev = await fetchModelsDevInfoForBaseUrl(probed.baseUrl, probed.ids);
-	}
+	// models.dev catalog: a base-URL match first, then a catalog-wide lookup by
+	// id so gateways that aren't in the catalog still get real metadata for
+	// known model ids. Applied ABOVE the local rules at finalize time.
+	const modelsDev = useModelsDev ? await fetchModelsDevInfoForBaseUrl(probed.baseUrl, probed.ids) : undefined;
 
-	const models =
-		options.knownModelFallback === false
-			? finalizeModelInfo([], [probed.infoById, gatewayWide, details])
-			: finalizeModelInfo(probed.ids, [probed.infoById, gatewayWide, details], { modelsDev, api: options.api });
+	const resolved = finalizeModelInfo(fillGaps ? probed.ids : [], [probed.infoById, gatewayWide, details], { modelsDev, api: options.api });
+	// Gateway-wide sources also describe models this key cannot list; the
+	// result only speaks for the ids that were actually listed.
+	const models = new Map<string, ModelProbeInfo>();
+	for (const id of probed.ids) {
+		const info = resolved.get(id);
+		if (info) models.set(id, info);
+	}
 
 	const result: DetectResult = { ...probed, models };
 	if (options.developerRole) {
-		const probedRole = probed.ids.length > 0 ? await probeDeveloperRole(probed.baseUrl, options.apiKey, probed.ids[0]) : undefined;
+		const probedRole = probed.ids.length > 0 ? await probeDeveloperRole(probed.baseUrl, options.apiKey, chatModelCandidates(probed.ids)) : undefined;
 		// Inconclusive probes default to false: sending "system" instead of
 		// "developer" is accepted everywhere, the reverse is not.
 		result.supportsDeveloperRole = probedRole ?? false;

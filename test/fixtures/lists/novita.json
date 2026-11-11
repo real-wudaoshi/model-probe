@@ -1,0 +1,215 @@
+{
+	"source": "https://api.novita.ai/openai/v1/models",
+	"captured": "2026-11-11",
+	"note": "Trimmed sample of a real response: a few entries, long strings shortened.",
+	"payload": {
+		"data": [
+			{
+				"created": 1793757877,
+				"id": "tencent/hy4",
+				"object": "model",
+				"owned_by": "novita",
+				"permission": null,
+				"root": "",
+				"parent": "",
+				"input_token_price_per_m": 4170,
+				"output_token_price_per_m": 12505,
+				"pricing": {
+					"prompt": {
+						"origin_price_per_m": 8340,
+						"price_per_m": 4170,
+						"origin_price_per_m_decimal": "0.834",
+						"price_per_m_decimal": "0.417"
+					},
+					"completion": {
+						"origin_price_per_m": 25010,
+						"price_per_m": 12505,
+						"origin_price_per_m_decimal": "2.501",
+						"price_per_m_decimal": "1.2505"
+					},
+					"input_cache_read": {
+						"origin_price_per_m": 420,
+						"price_per_m": 210,
+						"origin_price_per_m_decimal": "0.042",
+						"price_per_m_decimal": "0.021"
+					}
+				},
+				"is_tiered_billing": false,
+				"title": "tencent/hy4",
+				"description": "Tencent: The official release of Hy4 delivers comprehensive and substantial i...",
+				"tags": [],
+				"context_size": 1000000,
+				"status": 1,
+				"display_name": "Hy4",
+				"model_type": "chat",
+				"max_output_tokens": 64000,
+				"features": [
+					"serverless",
+					"function-calling",
+					"structured-outputs",
+					"reasoning"
+				],
+				"endpoints": [
+					"chat/completions",
+					"anthropic",
+					"responses"
+				],
+				"input_modalities": [
+					"text",
+					"image"
+				],
+				"output_modalities": [
+					"text"
+				]
+			},
+			{
+				"created": 1793757877,
+				"id": "tencent/hy4",
+				"object": "model",
+				"owned_by": "novita",
+				"permission": null,
+				"root": "",
+				"parent": "",
+				"input_token_price_per_m": 4170,
+				"output_token_price_per_m": 12505,
+				"pricing": {
+					"prompt": {
+						"origin_price_per_m": 8340,
+						"price_per_m": 4170,
+						"origin_price_per_m_decimal": "0.834",
+						"price_per_m_decimal": "0.417"
+					},
+					"completion": {
+						"origin_price_per_m": 25010,
+						"price_per_m": 12505,
+						"origin_price_per_m_decimal": "2.501",
+						"price_per_m_decimal": "1.2505"
+					},
+					"input_cache_read": {
+						"origin_price_per_m": 420,
+						"price_per_m": 210,
+						"origin_price_per_m_decimal": "0.042",
+						"price_per_m_decimal": "0.021"
+					}
+				},
+				"is_tiered_billing": false,
+				"title": "tencent/hy4",
+				"description": "Tencent: The official release of Hy4 delivers comprehensive and substantial i...",
+				"tags": [],
+				"context_size": 1000000,
+				"status": 1,
+				"display_name": "Hy4",
+				"model_type": "chat",
+				"max_output_tokens": 64000,
+				"features": [
+					"serverless",
+					"function-calling",
+					"structured-outputs",
+					"reasoning"
+				],
+				"endpoints": [
+					"chat/completions",
+					"anthropic",
+					"responses"
+				],
+				"input_modalities": [
+					"text",
+					"image"
+				],
+				"output_modalities": [
+					"text"
+				]
+			},
+			{
+				"created": 1789699811,
+				"id": "ming-image-0.1-design-layer",
+				"object": "model",
+				"owned_by": "novita",
+				"permission": null,
+				"root": "",
+				"parent": "",
+				"input_token_price_per_m": 0,
+				"output_token_price_per_m": 20000,
+				"pricing": {
+					"completion": {
+						"origin_price_per_m": 20000,
+						"price_per_m": 20000,
+						"origin_price_per_m_decimal": "2",
+						"price_per_m_decimal": "2"
+					},
+					"multimodal_input": [
+						{
+							"modals": [
+								"text"
+							]
+						},
+						{
+							"modals": [
+								"image"
+							]
+						},
+						{
+							"modals": [
+								"video"
+							]
+						},
+						{
+							"modals": [
+								"audio"
+							]
+						}
+					],
+					"multimodal_output": [
+						{
+							"modals": [
+								"text"
+							],
+							"output_token_base_price": 20000,
+							"output_token_discount_price": 20000
+						},
+						{
+							"modals": [
+								"image"
+							],
+							"output_token_base_price": 20000,
+							"output_token_discount_price": 20000
+						},
+						{
+							"modals": [
+								"video"
+							]
+						},
+						{
+							"modals": [
+								"audio"
+							]
+						}
+					]
+				},
+				"is_tiered_billing": false,
+				"title": "ming-image-0.1-design-layer",
+				"description": "",
+				"tags": [],
+				"context_size": 0,
+				"status": 1,
+				"display_name": "ming image 0.1 design layer",
+				"model_type": "chat",
+				"features": [
+					"serverless"
+				],
+				"input_modalities": [
+					"text",
+					"image",
+					"video",
+					"audio"
+				],
+				"output_modalities": [
+					"text",
+					"image",
+					"video",
+					"audio"
+				]
+			}
+		]
+	}
+}

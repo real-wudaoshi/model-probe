@@ -1,0 +1,465 @@
+{
+	"source": "https://openrouter.ai/api/v1/models",
+	"captured": "2026-11-11",
+	"note": "Trimmed sample of a real response: a few entries, long strings shortened.",
+	"payload": {
+		"total_count": 469,
+		"links": {
+			"next": null
+		},
+		"data": [
+			{
+				"id": "openrouter/auto",
+				"canonical_slug": "openrouter/auto",
+				"hugging_face_id": null,
+				"name": "Auto Router",
+				"created": 1793885889,
+				"description": "Auto is OpenRouter’s flagship model router, built for general-purpose usage. ...",
+				"context_length": 2000000,
+				"architecture": {
+					"modality": "text+image+file+audio+video->text+image",
+					"input_modalities": [
+						"text",
+						"image",
+						"audio",
+						"file",
+						"video"
+					],
+					"output_modalities": [
+						"text",
+						"image"
+					],
+					"tokenizer": "Router",
+					"instruct_type": null
+				},
+				"pricing": {
+					"prompt": "-1",
+					"completion": "-1"
+				},
+				"top_provider": {
+					"context_length": null,
+					"max_completion_tokens": null,
+					"is_moderated": false
+				},
+				"per_request_limits": null,
+				"supported_parameters": [
+					"frequency_penalty",
+					"include_reasoning",
+					"logit_bias",
+					"logprobs",
+					"max_tokens",
+					"min_p",
+					"prediction",
+					"presence_penalty",
+					"reasoning",
+					"reasoning_effort",
+					"repetition_penalty",
+					"response_format"
+				],
+				"default_parameters": {},
+				"supported_voices": null,
+				"knowledge_cutoff": null,
+				"expiration_date": null,
+				"links": {
+					"details": "/api/v1/models/openrouter/auto/endpoints"
+				},
+				"endpoints": [
+					"/api/v1/chat/completions",
+					"/api/v1/completions",
+					"/api/v1/messages",
+					"/api/v1/responses"
+				]
+			},
+			{
+				"id": "anthropic/claude-fable-5.2",
+				"canonical_slug": "anthropic/claude-fable-5.2-20261109",
+				"hugging_face_id": null,
+				"name": "Anthropic: Claude Fable 5.2",
+				"created": 1794253781,
+				"description": "Claude Fable 5.2 is Anthropic's most capable model for the most demanding tec...",
+				"context_length": 1000000,
+				"architecture": {
+					"modality": "text+image+file->text",
+					"input_modalities": [
+						"text",
+						"image",
+						"file"
+					],
+					"output_modalities": [
+						"text"
+					],
+					"tokenizer": "Claude",
+					"instruct_type": null
+				},
+				"pricing": {
+					"prompt": "0.000008",
+					"completion": "0.00004",
+					"web_search": "0.01",
+					"input_cache_read": "0.0000002",
+					"input_cache_write": "0.00001",
+					"input_cache_write_1h": "0.000016"
+				},
+				"top_provider": {
+					"context_length": 1000000,
+					"max_completion_tokens": 128000,
+					"is_moderated": true
+				},
+				"per_request_limits": null,
+				"supported_parameters": [
+					"include_reasoning",
+					"max_completion_tokens",
+					"max_tokens",
+					"reasoning",
+					"reasoning_effort",
+					"response_format",
+					"stop",
+					"structured_outputs",
+					"tool_choice",
+					"tools",
+					"verbosity"
+				],
+				"default_parameters": {},
+				"supported_voices": null,
+				"knowledge_cutoff": null,
+				"expiration_date": null,
+				"links": {
+					"details": "/api/v1/models/anthropic/claude-fable-5.2-20261109/endpoints"
+				},
+				"endpoints": [
+					"/api/v1/chat/completions",
+					"/api/v1/completions",
+					"/api/v1/messages",
+					"/api/v1/responses"
+				],
+				"benchmarks": {
+					"design_arena": [
+						{
+							"arena": "agents",
+							"category": "mobileapps",
+							"elo": 1336,
+							"win_rate": 67.4,
+							"rank": 2
+						},
+						{
+							"arena": "agents",
+							"category": "pdf",
+							"elo": 1352,
+							"win_rate": 75,
+							"rank": 1
+						},
+						{
+							"arena": "models",
+							"category": "3d",
+							"elo": 1527,
+							"win_rate": 78.3,
+							"rank": 1
+						},
+						{
+							"arena": "models",
+							"category": "codecategories",
+							"elo": 1344,
+							"win_rate": 59,
+							"rank": 8
+						},
+						{
+							"arena": "models",
+							"category": "gamedev",
+							"elo": 1394,
+							"win_rate": 64.8,
+							"rank": 5
+						},
+						{
+							"arena": "models",
+							"category": "uicomponent",
+							"elo": 1328,
+							"win_rate": 57.1,
+							"rank": 13
+						},
+						{
+							"arena": "models",
+							"category": "website",
+							"elo": 1310,
+							"win_rate": 55.1,
+							"rank": 8
+						}
+					],
+					"artificial_analysis": {
+						"intelligence_index": 64.6,
+						"coding_index": null,
+						"agentic_index": null
+					}
+				},
+				"reasoning": {
+					"mandatory": true,
+					"supported_efforts": [
+						"max",
+						"xhigh",
+						"high",
+						"medium",
+						"low"
+					],
+					"default_effort": "high"
+				}
+			},
+			{
+				"id": "openai/gpt-4.1",
+				"canonical_slug": "openai/gpt-4.1-2025-04-14",
+				"hugging_face_id": "",
+				"name": "OpenAI: GPT-4.1",
+				"created": 1744651385,
+				"description": "GPT-4.1 is a flagship large language model optimized for advanced instruction...",
+				"context_length": 1047576,
+				"architecture": {
+					"modality": "text+image+file->text",
+					"input_modalities": [
+						"image",
+						"text",
+						"file"
+					],
+					"output_modalities": [
+						"text"
+					],
+					"tokenizer": "GPT",
+					"instruct_type": null
+				},
+				"pricing": {
+					"prompt": "0.000002",
+					"completion": "0.000008",
+					"web_search": "0.01",
+					"input_cache_read": "0.0000005"
+				},
+				"top_provider": {
+					"context_length": 1047576,
+					"max_completion_tokens": 32768,
+					"is_moderated": true
+				},
+				"per_request_limits": null,
+				"supported_parameters": [
+					"max_completion_tokens",
+					"max_tokens",
+					"response_format",
+					"seed",
+					"structured_outputs",
+					"temperature",
+					"tool_choice",
+					"tools",
+					"top_p"
+				],
+				"default_parameters": {},
+				"supported_voices": null,
+				"knowledge_cutoff": "2024-06-30",
+				"expiration_date": null,
+				"links": {
+					"details": "/api/v1/models/openai/gpt-4.1-2025-04-14/endpoints"
+				},
+				"endpoints": [
+					"/api/v1/chat/completions",
+					"/api/v1/completions",
+					"/api/v1/messages",
+					"/api/v1/responses"
+				],
+				"benchmarks": {
+					"design_arena": [
+						{
+							"arena": "models",
+							"category": "3d",
+							"elo": 835,
+							"win_rate": 30.9,
+							"rank": 133
+						},
+						{
+							"arena": "models",
+							"category": "codecategories",
+							"elo": 1020,
+							"win_rate": 50.9,
+							"rank": 126
+						},
+						{
+							"arena": "models",
+							"category": "dataviz",
+							"elo": 1104,
+							"win_rate": 59.5,
+							"rank": 99
+						},
+						{
+							"arena": "models",
+							"category": "gamedev",
+							"elo": 1073,
+							"win_rate": 59.1,
+							"rank": 108
+						},
+						{
+							"arena": "models",
+							"category": "uicomponent",
+							"elo": 995,
+							"win_rate": 49.7,
+							"rank": 122
+						},
+						{
+							"arena": "models",
+							"category": "website",
+							"elo": 1035,
+							"win_rate": 52.3,
+							"rank": 127
+						}
+					]
+				}
+			},
+			{
+				"id": "google/gemini-4-carbon",
+				"canonical_slug": "google/gemini-4-carbon-20261110",
+				"hugging_face_id": null,
+				"name": "Google: Gemini 4 Carbon",
+				"created": 1794326871,
+				"description": "Gemini 4 Carbon is a frontier Gemini 4 model from Google for coding, agentic ...",
+				"context_length": 1048576,
+				"architecture": {
+					"modality": "text+image+file+audio+video->text",
+					"input_modalities": [
+						"audio",
+						"file",
+						"image",
+						"text",
+						"video"
+					],
+					"output_modalities": [
+						"text"
+					],
+					"tokenizer": "Gemini",
+					"instruct_type": null
+				},
+				"pricing": {
+					"prompt": "0.000002",
+					"completion": "0.00001",
+					"image": "0.000002",
+					"audio": "0.000002",
+					"input_audio_cache": "0.0000001",
+					"web_search": "0.014",
+					"internal_reasoning": "0.00001",
+					"input_cache_read": "0.0000001",
+					"input_cache_write": "0.0000001875"
+				},
+				"top_provider": {
+					"context_length": 1048576,
+					"max_completion_tokens": 943718,
+					"is_moderated": false
+				},
+				"per_request_limits": null,
+				"supported_parameters": [
+					"include_reasoning",
+					"max_tokens",
+					"reasoning",
+					"reasoning_effort",
+					"response_format",
+					"seed",
+					"stop",
+					"structured_outputs",
+					"temperature",
+					"tool_choice",
+					"tools",
+					"top_p"
+				],
+				"default_parameters": {
+					"temperature": null,
+					"top_p": null,
+					"top_k": null,
+					"frequency_penalty": null,
+					"presence_penalty": null,
+					"repetition_penalty": null
+				},
+				"supported_voices": null,
+				"knowledge_cutoff": null,
+				"expiration_date": null,
+				"links": {
+					"details": "/api/v1/models/google/gemini-4-carbon-20261110/endpoints"
+				},
+				"endpoints": [
+					"/api/v1/chat/completions",
+					"/api/v1/completions",
+					"/api/v1/messages",
+					"/api/v1/responses"
+				],
+				"benchmarks": {
+					"design_arena": [],
+					"artificial_analysis": {
+						"intelligence_index": 60,
+						"coding_index": null,
+						"agentic_index": null
+					}
+				},
+				"reasoning": {
+					"mandatory": true,
+					"supported_efforts": [
+						"high",
+						"medium",
+						"low"
+					],
+					"default_effort": "medium"
+				}
+			},
+			{
+				"id": "baidu/ernie-5.5-flash-preview:free",
+				"canonical_slug": "baidu/ernie-5.5-flash-preview-20261110",
+				"hugging_face_id": "baidu/ERNIE-5.5-Flash-Preview",
+				"name": "Baidu: ERNIE-5.5-Flash-Preview (free)",
+				"created": 1794333533,
+				"description": "ERNIE 5.5 Flash Preview is the latest foundation model in the ERNIE family, w...",
+				"context_length": 1024000,
+				"architecture": {
+					"modality": "text->text",
+					"input_modalities": [
+						"text"
+					],
+					"output_modalities": [
+						"text"
+					],
+					"tokenizer": "Other",
+					"instruct_type": null
+				},
+				"pricing": {
+					"prompt": "0",
+					"completion": "0"
+				},
+				"top_provider": {
+					"context_length": 1024000,
+					"max_completion_tokens": 921600,
+					"is_moderated": false
+				},
+				"per_request_limits": null,
+				"supported_parameters": [
+					"include_reasoning",
+					"max_tokens",
+					"reasoning",
+					"reasoning_effort",
+					"response_format",
+					"structured_outputs",
+					"temperature",
+					"tool_choice",
+					"tools",
+					"top_p"
+				],
+				"default_parameters": {},
+				"supported_voices": null,
+				"knowledge_cutoff": null,
+				"expiration_date": null,
+				"links": {
+					"details": "/api/v1/models/baidu/ernie-5.5-flash-preview-20261110/endpoints"
+				},
+				"endpoints": [
+					"/api/v1/chat/completions",
+					"/api/v1/completions",
+					"/api/v1/messages",
+					"/api/v1/responses"
+				],
+				"reasoning": {
+					"mandatory": true,
+					"default_enabled": true,
+					"supported_efforts": [
+						"high"
+					],
+					"default_effort": "high"
+				}
+			}
+		]
+	}
+}

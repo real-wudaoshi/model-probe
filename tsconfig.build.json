@@ -1,0 +1,14 @@
+{
+	// Emit the JavaScript + type declarations that get published (dist/).
+	// Node refuses to strip types from files under node_modules, so the package
+	// cannot ship its .ts sources as entry points.
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"noEmitOnError": true,
+		"rootDir": ".",
+		"outDir": "dist",
+		"declaration": true
+	},
+	"include": ["index.ts", "cli.ts", "src"]
+}

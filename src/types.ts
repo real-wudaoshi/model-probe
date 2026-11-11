@@ -3,9 +3,12 @@
 // Every field has one of five sources, highest priority first:
 //   1. detected   — real data from the gateway (no tag)
 //   2. models.dev — exact per-model catalog entries (listed in modelsDevFields)
-//   3. local rule — regex guesses from the known-model table (listed in inferredFields)
+//   3. local rule — regex guesses from the known-model table, or a context
+//                   window spelled out in the id itself, e.g. "[1m]" (listed
+//                   in inferredFields)
 //   4. api fallback — protocol-level limits when nothing else spoke (listed in defaultedFields)
 //   5. default    — filled from MODEL_INFO_DEFAULTS (listed in defaultedFields)
+
 // USD per 1M tokens — pi's ModelCostRates convention (and models.dev's).
 // No local-rule or default source: a guessed price is worse than none, so
 // cost only ever comes from the gateway itself or the models.dev catalog.
@@ -37,8 +40,9 @@ export type ProbeResult = {
 	ids: string[];
 	/** Metadata discovered alongside the listing (inline list fields, Ollama tags, ...). */
 	infoById: Map<string, ModelProbeInfo>;
-	// The base variant that actually answered /models (may differ from the
-	// given baseUrl by a /v1 suffix on quirky gateways).
+	// The base that actually answered /models: it may differ from the given
+	// baseUrl by a /v1 suffix on quirky gateways, by the scheme (http -> https),
+	// or by whatever a redirect led to.
 	baseUrl: string;
 };
 
@@ -48,8 +52,8 @@ export type ProbeResult = {
  * - `modelGroupInfo`: LiteLLM /model_group/info
  * - `publicCatalog`: New API style /api/models/public (on the site host)
  * - `perModelDetails`: per-model GET /models/{id}
- * - `modelsDev`: models.dev catalog matched by base URL (sits below the local
- *   rules in priority)
+ * - `modelsDev`: models.dev catalog matched by base URL, then by model id
+ *   (sits above the local rules in priority, below detected values)
  */
 export interface DetectProfile {
 	modelInfo?: boolean;
@@ -68,5 +72,18 @@ export const FULL_PROFILE: Required<DetectProfile> = {
 	modelsDev: true,
 };
 
+function timeoutFromEnv(): number | undefined {
+	const raw = process.env.MODEL_PROBE_TIMEOUT_MS?.trim();
+	if (!raw || !/^\d+$/.test(raw)) return undefined;
+	const value = Number(raw);
+	return value >= 50 && value <= 120_000 ? value : undefined;
+}
+
 export const PROBE_CONCURRENCY = 4;
-export const PROBE_TIMEOUT_MS = 4000;
+/**
+ * How long a probe request may stay silent: the response headers must arrive
+ * within it, and no gap between chunks of the body may exceed it. 4 seconds,
+ * unless the MODEL_PROBE_TIMEOUT_MS environment variable says otherwise (for
+ * slow links).
+ */
+export const PROBE_TIMEOUT_MS = timeoutFromEnv() ?? 4000;

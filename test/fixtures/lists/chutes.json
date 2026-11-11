@@ -1,0 +1,76 @@
+{
+	"source": "https://llm.chutes.ai/v1/models",
+	"captured": "2026-11-11",
+	"note": "Trimmed sample of a real response: a few entries, long strings shortened.",
+	"payload": {
+		"object": "list",
+		"data": [
+			{
+				"id": "Qwen/Qwen3.8-27B-TEE",
+				"root": "Qwen/Qwen3.8-27B-FP8",
+				"price": {
+					"input": {
+						"tao": 0.00017785536528071733,
+						"usd": 0.039
+					},
+					"output": {
+						"tao": 0.005700492476946068,
+						"usd": 1.25
+					},
+					"input_cache_read": {
+						"tao": 0.000017785536528071726,
+						"usd": 0.003899999999999999
+					}
+				},
+				"object": "model",
+				"parent": null,
+				"created": 1794401541,
+				"pricing": {
+					"prompt": 0.039,
+					"completion": 1.25,
+					"input_cache_read": 0.003899999999999999
+				},
+				"chute_id": "9ecb73cc-909b-5334-9cd8-74985945cff5",
+				"owned_by": "sglang",
+				"quantization": "fp8",
+				"max_model_len": 262144,
+				"context_length": 262144,
+				"input_modalities": [
+					"text",
+					"image"
+				],
+				"max_output_length": 65536,
+				"output_modalities": [
+					"text"
+				],
+				"supported_features": [
+					"json_mode",
+					"tools",
+					"structured_outputs",
+					"reasoning"
+				],
+				"confidential_compute": true,
+				"supported_sampling_parameters": [
+					"temperature",
+					"top_p",
+					"top_k",
+					"repetition_penalty",
+					"frequency_penalty",
+					"presence_penalty",
+					"stop",
+					"seed"
+				]
+			},
+			{
+				"id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+				"object": "model",
+				"created": 1793020897,
+				"owned_by": "chutes",
+				"root": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+				"parent": null,
+				"chute_id": "34c7b79d-854b-5e32-981a-774d322062b0",
+				"confidential_compute": false
+			}
+		]
+	}
+}

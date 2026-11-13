@@ -193,6 +193,13 @@ describe("capabilities", () => {
 		assert.deepEqual(await parse({ supports_image_in: true, supports_video_in: true, supports_reasoning: true }), { reasoning: true, image: true, video: true });
 	});
 
+	it("reads DeepSeek's inline thinking effort levels", async () => {
+		assert.deepEqual(await parse({ effort: { supported_levels: ["low", "high", "max"], default_level: "high" } }), {
+			reasoning: true,
+			effortOptions: ["low", "high", "max"],
+		});
+	});
+
 	it("treats tags as proof of presence only", async () => {
 		assert.deepEqual(await parse({ context_length: 1000, tags: ["vision", "reasoning"] }), { contextWindow: 1000, reasoning: true, image: true });
 		assert.deepEqual(await parse({ context_length: 1000, tags: ["tool-use"] }), { contextWindow: 1000 }, "a missing tag proves nothing");

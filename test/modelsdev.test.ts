@@ -12,6 +12,10 @@ const {
 	fetchModelsDevInfoForBaseUrl,
 	fetchModelsDevModels,
 	fetchModelsDevProviders,
+	fetchModelMetadata,
+	getMetadataSourceLabel,
+	metadataUpdateFields,
+	savedModelMetadata,
 	getModelsDevCatalogInfo,
 	resetModelsDevCatalog,
 } = await import("../index.ts");
@@ -24,10 +28,10 @@ const CDN_HOST = "cdn.jsdelivr.net";
 const CATALOG = {
 	providers: {
 		makerco: catalogProvider("makerco", "https://api.makerco.example/v1", {
-			"flagship-1": { context: 1000000, output: 64000, input: ["text", "image"], reasoning: true, canonical: "makerco/flagship-1", cost: { input: 3, output: 15, cache_read: 0.3 } },
+			"flagship-1": { context: 1000000, output: 64000, input: ["text", "image"], reasoning: true, canonical: "makerco/flagship-1", cost: { input: 3, output: 15, cache_read: 0.3 }, effort: ["low", "high", "max"] },
 		}),
 		"reseller-a": catalogProvider("reseller-a", "https://a.example/v1", {
-			"makerco/flagship-1": { context: 200000, output: 8000, input: ["text"], reasoning: true, canonical: "makerco/flagship-1", cost: { input: 9, output: 45 } },
+			"makerco/flagship-1": { context: 200000, output: 8000, input: ["text"], reasoning: true, canonical: "makerco/flagship-1", cost: { input: 9, output: 45 }, effort: ["low", "high"] },
 			"openllama-70b": { context: 32768, output: 4096, canonical: "openlab/openllama-70b" },
 			"mystery-model": { context: 8000, output: 1000 },
 		}),
@@ -233,6 +237,19 @@ describe("requireLive (for callers that sync against the catalog)", () => {
 		// The default stays lenient: metadata lookups work offline.
 		assert.ok((await fetchModelsDevModels("openai")).size > 0);
 	});
+
+	it("can use the offline table as a reference for a single model", async () => {
+		live = "down";
+		const options = { catalogProviderId: "reseller-a", requireLiveCatalog: true };
+		await assert.rejects(fetchModelMetadata([], options), /models\.dev is unreachable/);
+		const id = "makerco/flagship-1";
+		const info = (await fetchModelMetadata([id], options)).infoById.get(id)!;
+		assert.equal(info.contextWindow, 200000);
+		assert.equal(info.cost?.input, 9);
+		assert.deepEqual(info.effortOptions, ["low", "high"]);
+		assert.equal(getMetadataSourceLabel(info, "cost"), "infer · models.dev · makerco/flagship-1 (reseller-a)");
+		assert.ok(!metadataUpdateFields(info, savedModelMetadata({ cost: info.cost })).includes("cost"));
+	});
 });
 
 describe("provider tables", () => {
@@ -249,6 +266,7 @@ describe("provider tables", () => {
 			image: true,
 			video: false,
 			reasoning: true,
+			effortOptions: ["low", "high", "max"],
 			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
 		});
 	});
@@ -281,6 +299,11 @@ describe("lookup by base URL", () => {
 		const info = (await fetchModelsDevInfoForBaseUrl("https://a.example/v1")).get("makerco/flagship-1");
 		assert.equal(info?.contextWindow, 200000, "what this host serves, not the maker's number");
 		assert.deepEqual(info?.cost, { input: 9, output: 45, cacheRead: 0, cacheWrite: 0 });
+		const alias = "makerco/flagship-1:preview";
+		const matched = (await fetchModelsDevInfoForBaseUrl("https://a.example/v1", [alias])).get(alias);
+		assert.deepEqual(matched?.cost, info?.cost);
+		assert.deepEqual(matched?.effortOptions, ["low", "high"]);
+		assert.equal(getMetadataSourceLabel(matched, "cost"), "infer · models.dev · makerco/flagship-1 (reseller-a)");
 	});
 
 	it("recognizes native-API hosts the catalog lists without an endpoint", async () => {
@@ -293,6 +316,9 @@ describe("lookup by base URL", () => {
 		assert.deepEqual(info.get("flagship-1")?.cost, { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 }, "the host's own entry");
 		assert.equal(info.get("openllama-70b")?.contextWindow, 32768, "from the id index");
 		assert.equal(info.has("nope"), false);
+		const host = (await fetchModelsDevInfoForBaseUrl("https://b.example", ["flagship-1"])).get("flagship-1");
+		assert.equal(host?.contextWindow, 200000);
+		assert.equal(getMetadataSourceLabel(host, "cost"), "infer · models.dev · flagship-1 (makerco)");
 	});
 
 	it("still answers by id when the base URL is not a URL", async () => {
@@ -305,7 +331,11 @@ describe("lookup by model id (for gateways the catalog does not know)", () => {
 
 	it("answers a proprietary model with what its maker published, not with what most resellers list", async () => {
 		// Two resellers say 200K / 8K; the maker says 1M / 64K.
-		assert.deepEqual(await lookup("flagship-1"), { contextWindow: 1000000, maxTokens: 64000, image: true, video: false, reasoning: true });
+		const info = await lookup("flagship-1");
+		assert.equal(info?.contextWindow, 1000000);
+		assert.equal(info?.maxTokens, 64000);
+		assert.equal(info?.image, true);
+		assert.equal(info?.reasoning, true);
 	});
 
 	it("answers an open-weights model with what most hosts actually serve", async () => {
@@ -323,13 +353,30 @@ describe("lookup by model id (for gateways the catalog does not know)", () => {
 		assert.equal((await lookup("labonly-1"))?.contextWindow, 400000);
 	});
 
-	it("never takes prices from the id tier", async () => {
-		assert.equal((await lookup("flagship-1"))?.cost, undefined);
-		assert.equal((await lookup("makerco/flagship-1"))?.cost, undefined);
+	it("resolves reference prices and effort with the matching model and provider", async () => {
+		const id = "relay/makerco/flagship-1:preview";
+		const result = await fetchModelMetadata([id, "makerco/flagship-1", "openllama-70b"]);
+		for (const alias of [id, "makerco/flagship-1"]) {
+			const record = result.models.get(alias);
+			assert.deepEqual(record?.info.cost, { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 });
+			assert.deepEqual(record?.info.effortOptions, ["low", "high", "max"]);
+			assert.equal(record?.provenance.cost?.infer, true);
+			assert.equal(record?.provenance.effortOptions?.infer, true);
+			assert.equal(getMetadataSourceLabel(record?.info, "reasoning", true), "infer · models.dev · flagship-1 (makerco)");
+		}
+		assert.equal(result.infoById.get("openllama-70b")?.cost, undefined);
+		const detectedCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		const listing = { ids: [id], baseUrl: "https://unknown-relay.example/v1", infoById: new Map([[id, { cost: detectedCost, effortOptions: ["medium"] }]]) };
+		const detected = (await fetchModelMetadata([id], {
+			listing, profile: { modelInfo: false, modelGroupInfo: false, publicCatalog: false, perModelDetails: false, modelsDev: true },
+		})).models.get(id);
+		assert.deepEqual(detected?.info.cost, detectedCost);
+		assert.deepEqual(detected?.info.effortOptions, ["medium"]);
+		assert.equal(detected?.provenance.cost?.source, "gateway");
 	});
 
 	it("matches decorated ids", async () => {
-		for (const id of ["relay/flagship-1", "FLAGSHIP-1", "flagship-1:free", "relay/flagship-1-20260101", "flagship-1@v2", "flagship-1[1m]", "aws/flagship-1-thinking"]) {
+		for (const id of ["relay/flagship-1", "FLAGSHIP-1", "flagship-1:free", "relay/flagship-1-20260101", "flagship-1@v2", "flagship-1[1m]", "aws/flagship-1-thinking", "flagship-1-ascend"]) {
 			assert.equal((await lookup(id))?.contextWindow, 1000000, id);
 		}
 	});

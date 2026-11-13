@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ModelProbeInfo } from "./types.ts";
+import type { MetadataProvenance, ModelProbeInfo } from "./types.ts";
+import { getMetadataProvenance, withMetadataProvenance } from "./provenance.ts";
 
 // Known-model rules classify well-known model ids and preset their context
 // window, image/video input, and reasoning support. Used when a gateway
@@ -31,6 +32,7 @@ export type KnownModelRule = {
 };
 
 type CompiledRule = {
+	pattern: string;
 	regex: RegExp;
 	contextWindow?: number;
 	maxTokens?: number;
@@ -86,6 +88,7 @@ function compileRules(raw: unknown, source: string): CompiledRule[] {
 		const flags = (typeof entry.flags === "string" ? entry.flags : "i").replace(/[gy]/g, "");
 		try {
 			out.push({
+				pattern: entry.pattern,
 				regex: new RegExp(entry.pattern, flags),
 				contextWindow: positiveNumber(entry.contextWindow),
 				maxTokens: positiveNumber(entry.maxTokens),
@@ -147,7 +150,7 @@ function loadRules(): CompiledRule[] {
 const SUFFIX_LAYERS: RegExp[] = [
 	/\[[^[\]]*\]$/, // [1m]: relay convention marking a 1M-context variant
 	/:[^/:]+$/, // :free / :thinking (OpenRouter), :latest / :8b (Ollama)
-	/-(?:latest|recent|free|preview|stable|thinking|nothinking|reasoning|turbo|hi|highspeed|dev|beta|auto|labs|minimal|low|medium|high|xhigh)$/,
+	/-(?:latest|recent|free|preview|stable|thinking|nothinking|reasoning|turbo|hi|highspeed|dev|beta|auto|labs|minimal|low|medium|high|xhigh|ascend)$/,
 	/-20\d{6}$/, // date tail: -20250601
 	/-\d{4}-\d{2}-\d{2}$/, // dashed date: -2025-08-07
 	/-\d{2}-\d{2}$/, // month-day tail: -preview-05-20
@@ -221,12 +224,12 @@ export function applyModelIdHints(modelId: string, info: ModelProbeInfo | undefi
 	if (info?.contextWindow !== undefined) return info;
 	const contextWindow = declaredContextWindow(modelId);
 	if (contextWindow === undefined) return info;
-	return {
+	return withMetadataProvenance({
 		...(info ?? {}),
 		contextWindow,
 		inferred: true,
 		inferredFields: [...(info?.inferredFields ?? []), "contextWindow"],
-	};
+	}, { ...getMetadataProvenance(info), contextWindow: { source: "id-hint", match: "hint", infer: true, candidate: modelId, ruleMatch: /\[[^\]]+\]\s*$/.exec(modelId)?.[0].trim() } });
 }
 
 // Classify a model id against the rules and return the preset metadata.
@@ -237,16 +240,18 @@ export function applyModelIdHints(modelId: string, info: ModelProbeInfo | undefi
 // specific candidate is tried.
 function matchKnownModelRule(modelId: string): ModelProbeInfo | undefined {
 	const info: ModelProbeInfo = {};
+	const sources: MetadataProvenance = {};
 	let matched = false;
 	for (const candidate of normalizeModelIdCandidates(modelId)) {
 		for (const rule of loadRules()) {
-			if (!rule.regex.test(candidate)) continue;
+			const match = rule.regex.exec(candidate);
+			if (!match) continue;
 			matched = true;
-			if (info.contextWindow === undefined && rule.contextWindow !== undefined) info.contextWindow = rule.contextWindow;
-			if (info.maxTokens === undefined && rule.maxTokens !== undefined) info.maxTokens = rule.maxTokens;
-			if (info.image === undefined && rule.image !== undefined) info.image = rule.image;
-			if (info.video === undefined && rule.video !== undefined) info.video = rule.video;
-			if (info.reasoning === undefined && rule.reasoning !== undefined) info.reasoning = rule.reasoning;
+			for (const field of ["contextWindow", "maxTokens", "image", "video", "reasoning"] as const) {
+				if (info[field] !== undefined || rule[field] === undefined) continue;
+				(info as Record<string, unknown>)[field] = rule[field];
+				sources[field] = { source: "rule", match: "rule", infer: true, candidate, rulePattern: rule.pattern, ruleMatch: match[0] || undefined };
+			}
 		}
 		if (
 			info.contextWindow !== undefined &&
@@ -255,10 +260,10 @@ function matchKnownModelRule(modelId: string): ModelProbeInfo | undefined {
 			info.video !== undefined &&
 			info.reasoning !== undefined
 		) {
-			return info;
+			return withMetadataProvenance(info, sources);
 		}
 	}
-	return matched ? info : undefined;
+	return matched ? withMetadataProvenance(info, sources) : undefined;
 }
 
 // Fill any fields the probe couldn't determine from the known-model rules.
@@ -291,5 +296,7 @@ export function applyKnownModelFallback(modelId: string, info: ModelProbeInfo | 
 		inferredFields.push("reasoning");
 	}
 	if (inferredFields.length === before) return info;
-	return { ...(info ?? {}), ...filled, inferred: true, inferredFields };
+	const sources = getMetadataProvenance(info), guessed = getMetadataProvenance(known);
+	for (const field of Object.keys(filled) as Array<keyof typeof sources>) sources[field] = guessed[field];
+	return withMetadataProvenance({ ...(info ?? {}), ...filled, inferred: true, inferredFields }, sources);
 }

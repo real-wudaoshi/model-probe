@@ -1,5 +1,25 @@
 # model-probe
 
+### Look up known model IDs
+
+`fetchModelMetadata(ids, options)` accepts one or more original model IDs.
+Pass `baseUrl` and optionally `apiKey` for gateway metadata, or omit the URL
+for a catalog and rules lookup. Each entry in `result.models` contains
+`id`, `info`, and serializable, per-field `provenance`. For example, a
+normalized catalog match may display as `infer · models.dev · gpt-4o`.
+Use the original ID when calling the gateway. ID-only matching can supply
+reference prices and reasoning effort levels from a matching catalog offering.
+Their provenance names the offering's provider and model. A reference quote
+may differ from the gateway's actual rates.
+
+For refresh and sync, `metadataUpdateFields(fresh, saved)` selects fields
+from the gateway or an exact catalog match first, preserves saved values,
+and uses inference to fill missing fields. Explicit custom edits are kept.
+
+Pass an empty ID list with a base URL to discover its models. A preview can
+disable `profile.perModelDetails`, then pass `result.context` with selected IDs
+to load their details without repeating the bulk requests.
+
 Probe OpenAI-compatible gateways for their model list and per-model metadata
 (context window, image/video input, reasoning, list prices, endpoint types).
 Works with LiteLLM, One API, New API, OpenRouter, Google's native Gemini API,
@@ -67,9 +87,10 @@ Runs on Node >= 22 (and Bun). The package ships compiled JavaScript in
   real metadata for well-known ids, with decorated ids matched through the same
   normalization chain as the local rules. The id tier answers a proprietary
   model with what its maker published, and an open-weights model with the
-  value most hosts serve. It deliberately carries **no cost** — resellers price
-  differently, so prices only come from a base-URL match or from the gateway
-  itself. Disable with `profile: { modelsDev: false }`. Degenerate catalog
+  value most hosts serve. Price and effort fields from the catalog-wide match
+  are marked as inferred, with the maker's offering preferred when available.
+  The gateway's metadata and the host's own catalog entry take precedence.
+  Disable with `profile: { modelsDev: false }`. Degenerate catalog
   limits (`maxTokens == contextWindow`) are clamped by `normalizeModelLimits`
   to `min(32K, ctx/4)` before they reach callers.
 - **API fallback** — when the gateway, the catalog, and the rules all stay
@@ -88,8 +109,7 @@ Runs on Node >= 22 (and Bun). The package ships compiled JavaScript in
 - **List prices** — `cost` (USD per 1M tokens: input / output / cacheRead /
   cacheWrite) from the gateway itself (LiteLLM `input_cost_per_token` & co.,
   inline `pricing` in either per-token or per-1M units) or the models.dev
-  catalog. There is no local rule or default for cost — a guessed price is
-  worse than none.
+  catalog. Prices borrowed from a matching model ID are reference rates.
 - **Developer-role probe** (opt-in) — one tiny chat completion with a
   `developer`-role message tells you whether the gateway accepts the OpenAI
   developer role. Gateways that don't (Kimi's subscription endpoint, some

@@ -28,6 +28,10 @@ export {
 export type { ModelsDevCatalogInfo, ModelsDevProvider } from "./src/modelsdev.ts";
 export { detectModels, fetchGatewayWideInfo, fetchPerModelInfo, finalizeModelInfo, resolveModelInfo } from "./src/detect.ts";
 export type { DetectOptions, DetectResult } from "./src/detect.ts";
+export { fetchModelMetadata, getModelLimits, existingMetadata } from "./src/metadata.ts";
+export type { ModelMetadataOptions, MetadataBatchResult, MetadataContext } from "./src/metadata.ts";
+export { getMetadataProvenance, getMetadataSourceLabel, isMetadataAuthoritative, metadataUpdateFields, mergeWithExistingMetadata, savedModelMetadata, markCustomMetadata, withMetadataProvenance } from "./src/provenance.ts";
+export type { MetadataField, MetadataSource, MetadataReference, FieldProvenance, MetadataProvenance, ResolvedModelMetadata } from "./src/types.ts";
 export { normalizeBaseUrl } from "./src/url.ts";
 export { FULL_PROFILE, PROBE_CONCURRENCY, PROBE_TIMEOUT_MS } from "./src/types.ts";
 export type { DetectProfile, ModelCostInfo, ModelProbeInfo, ProbeResult } from "./src/types.ts";

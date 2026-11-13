@@ -28,7 +28,8 @@ import { request } from "./http.ts";
 import { normalizeModelIdCandidates } from "./known-models.ts";
 import { normalizeModelLimits } from "./probe.ts";
 import { PROBE_TIMEOUT_MS } from "./types.ts";
-import type { ModelProbeInfo } from "./types.ts";
+import type { MetadataField, MetadataProvenance, MetadataReference, ModelProbeInfo } from "./types.ts";
+import { getMetadataProvenance, METADATA_FIELDS, withMetadataProvenance } from "./provenance.ts";
 
 export type ModelsDevProvider = {
 	id: string;
@@ -56,6 +57,7 @@ export type ModelsDevCatalogInfo = {
 // Gateway, ...) or aren't OpenAI-compatible (Anthropic, Google) have no entry.
 const DEFAULT_BASE_URLS: Record<string, string> = {
 	openai: "https://api.openai.com/v1",
+	deepseek: "https://api.deepseek.com",
 	groq: "https://api.groq.com/openai/v1",
 	mistral: "https://api.mistral.ai/v1",
 	xai: "https://api.x.ai/v1",
@@ -366,7 +368,9 @@ function parseSharedFields(model: LabModel): ModelProbeInfo {
 	// Data hygiene: catalogs publish degenerate limits (output == context) for
 	// models whose real output cap is unknown — clamp before anyone consumes it.
 	if (info.contextWindow !== undefined && info.maxTokens !== undefined) {
-		info.maxTokens = normalizeModelLimits(info.contextWindow, info.maxTokens).maxTokens;
+		const normalized = normalizeModelLimits(info.contextWindow, info.maxTokens).maxTokens;
+		if (normalized !== info.maxTokens) withMetadataProvenance(info, { maxTokens: { source: "api-default", match: "default", infer: true, derivation: "limit-reconciliation" } });
+		info.maxTokens = normalized;
 	}
 	const input = model.modalities?.input;
 	if (Array.isArray(input)) {
@@ -379,28 +383,22 @@ function parseSharedFields(model: LabModel): ModelProbeInfo {
 
 // Pull the fields we track out of one provider's model entry.
 function parseModelEntry(model: Model): ModelProbeInfo | undefined {
+	if (!model || typeof model !== "object") return undefined;
 	const info = parseSharedFields(model as LabModel);
 
-	const effort = model.reasoning_options?.find((o) => o.type === "effort");
-	if (effort && effort.type === "effort") {
-		info.effortOptions = effort.values.filter((v): v is Exclude<typeof v, null> => typeof v === "string");
+	const effort = Array.isArray(model.reasoning_options) ? model.reasoning_options.find((o) => o?.type === "effort") : undefined;
+	if (info.reasoning !== false && effort && Array.isArray(effort.values)) {
+		const values = [...new Set(effort.values.filter((v): v is Exclude<typeof v, null> => typeof v === "string" && v.trim() !== ""))];
+		if (values.length) info.effortOptions = values;
 	}
 
 	// Catalog list prices, already USD per 1M tokens. Missing cache rates map
 	// to 0, matching pi's builtin catalogs.
-	const cost = (model as any).cost;
-	if (cost && typeof cost === "object") {
-		const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
-		const input = num(cost.input);
-		const output = num(cost.output);
-		if (input !== undefined || output !== undefined) {
-			info.cost = {
-				input: input ?? 0,
-				output: output ?? 0,
-				cacheRead: num(cost.cache_read) ?? 0,
-				cacheWrite: num(cost.cache_write) ?? 0,
-			};
-		}
+	const cost = model.cost;
+	const rate = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+	const input = rate(cost?.input), output = rate(cost?.output);
+	if (input !== undefined && output !== undefined) {
+		info.cost = { input, output, cacheRead: rate(cost?.cache_read) ?? 0, cacheWrite: rate(cost?.cache_write) ?? 0 };
 	}
 
 	return Object.keys(info).length > 0 ? info : undefined;
@@ -440,7 +438,15 @@ export async function fetchModelsDevModels(providerId: string, options: { requir
 	if (models && typeof models === "object") {
 		for (const [id, model] of Object.entries(models)) {
 			const info = parseModelEntry(model);
-			if (info) out.set(id, info);
+			if (info) {
+				const sources: MetadataProvenance = {};
+				const reference: MetadataReference = { modelId: id, providerId, ...((model as any).canonical_model_id ? { canonicalModelId: (model as any).canonical_model_id } : {}) };
+				for (const field of METADATA_FIELDS) if (info[field] !== undefined) {
+					const inherited = getMetadataProvenance(info)[field];
+					sources[field] = inherited?.derivation ? { ...inherited, references: [reference] } : { source: "models.dev", match: "exact", infer: false, referenceModelId: id, references: [reference], candidate: id };
+				}
+				out.set(id, withMetadataProvenance(info, sources));
+			}
 		}
 	}
 	return out;
@@ -478,9 +484,11 @@ function sameBaseUrl(a: string, b: string): boolean {
 //     limits, so the common value is a better guess than the architecture's
 //     theoretical maximum.
 //
-// Cost is deliberately NOT taken from this tier: resellers price differently
-// and a base-URL match already supplies the real per-host pricing.
+// Prices and named effort levels come from a single offering per field.
+// Prefer the maker's offering when available and keep its provider in the trace.
 type Vote<V> = Map<V, number>;
+const REFERENCE_FIELDS = ["cost", "effortOptions"] as const;
+type ReferenceOffer = Pick<ModelProbeInfo, typeof REFERENCE_FIELDS[number]> & { reference: MetadataReference };
 
 type IdVotes = {
 	contextWindow: Vote<number>;
@@ -489,6 +497,9 @@ type IdVotes = {
 	video: Vote<boolean>;
 	reasoning: Vote<boolean>;
 	canonical: Vote<string>;
+	references: Partial<Record<MetadataField, Map<number | boolean, MetadataReference[]>>>;
+	canonicalReferences: Map<string, MetadataReference[]>;
+	offers: ReferenceOffer[];
 };
 
 function bump<V>(votes: Vote<V>, value: V | undefined): void {
@@ -524,17 +535,27 @@ async function getIdIndex(): Promise<Map<string, ModelProbeInfo>> {
 	const labModels = catalog.models;
 
 	const votes = new Map<string, IdVotes>();
-	for (const provider of Object.values(catalog.providers)) {
+	const canonicalOffers = new Map<string, ReferenceOffer[]>();
+	for (const [providerId, provider] of Object.entries(catalog.providers)) {
 		const models = provider?.models;
 		if (!models || typeof models !== "object") continue;
 		for (const [catalogId, model] of Object.entries(models)) {
 			const info = parseModelEntry(model as Model);
 			if (!info) continue;
-			const canonical = (model as any).canonical_model_id;
+			const canonical = model.canonical_model_id;
+			const reference: MetadataReference = { modelId: catalogId, providerId, ...(canonical ? { canonicalModelId: canonical } : {}),
+				...(getMetadataProvenance(info).maxTokens?.derivation ? { derivedFields: ["maxTokens" as const] } : {}) };
+			const offer = info.cost || info.effortOptions ? { cost: info.cost, effortOptions: info.effortOptions, reference } : undefined;
+			const offeringLab = canonical ?? `${providerId}/${catalogId}`;
+			if (offer && Object.hasOwn(labModels, offeringLab)) {
+				const offers = canonicalOffers.get(offeringLab) ?? [];
+				offers.push(offer);
+				canonicalOffers.set(offeringLab, offers);
+			}
 			for (const key of indexKeys(catalogId)) {
 				let entry = votes.get(key);
 				if (!entry) {
-					entry = { contextWindow: new Map(), maxTokens: new Map(), image: new Map(), video: new Map(), reasoning: new Map(), canonical: new Map() };
+					entry = { contextWindow: new Map(), maxTokens: new Map(), image: new Map(), video: new Map(), reasoning: new Map(), canonical: new Map(), references: {}, canonicalReferences: new Map(), offers: [] };
 					votes.set(key, entry);
 				}
 				bump(entry.contextWindow, info.contextWindow);
@@ -542,7 +563,19 @@ async function getIdIndex(): Promise<Map<string, ModelProbeInfo>> {
 				bump(entry.image, info.image);
 				bump(entry.video, info.video);
 				bump(entry.reasoning, info.reasoning);
-				if (typeof canonical === "string" && Object.hasOwn(labModels, canonical)) bump(entry.canonical, canonical);
+				if (offer) entry.offers.push(offer);
+				for (const field of ["contextWindow", "maxTokens", "image", "video", "reasoning"] as const) {
+					const value = info[field];
+					if (value === undefined) continue;
+					const byValue = entry.references[field] ??= new Map();
+					const refs = byValue.get(value) ?? [];
+					refs.push(reference); byValue.set(value, refs);
+				}
+				if (typeof canonical === "string" && Object.hasOwn(labModels, canonical)) {
+					bump(entry.canonical, canonical);
+					const refs = entry.canonicalReferences.get(canonical) ?? [];
+					refs.push(reference); entry.canonicalReferences.set(canonical, refs);
+				}
 			}
 		}
 	}
@@ -574,12 +607,42 @@ async function getIdIndex(): Promise<Map<string, ModelProbeInfo>> {
 		const lab = labId ? labModels[labId] : undefined;
 		const published = lab && typeof lab === "object" ? parseSharedFields(lab) : {};
 		const info: ModelProbeInfo = lab && lab.open_weights !== true ? { ...voted, ...published } : { ...published, ...voted };
+		const sources: MetadataProvenance = {};
+		for (const field of ["contextWindow", "maxTokens", "image", "video", "reasoning"] as const) {
+			if (info[field] === undefined) continue;
+			const fromLab = published[field] !== undefined && (lab?.open_weights !== true || voted[field] === undefined);
+			const references = fromLab && labId
+				? [{ modelId: labId, canonicalModelId: labId }, ...(entry?.canonicalReferences.get(labId) ?? [])]
+				: entry?.references[field]?.get(voted[field]!) ?? [];
+			const names = [...new Set(references.map((ref) => ref.modelId))];
+			sources[field] = { source: "models.dev", match: references.length > 1 ? "aggregate" : "exact", infer: false,
+				referenceModelId: fromLab ? labId : names.length === 1 ? names[0] : undefined, references };
+			if ((fromLab && getMetadataProvenance(published)[field]?.derivation) || (!fromLab && references.length > 0 && references.every((ref) => ref.derivedFields?.includes(field)))) {
+				sources[field] = { source: "api-default", match: "default", infer: true, derivation: "limit-reconciliation", references };
+			}
+		}
+
+		const maker = labId?.split("/")[0];
+		const offers = [...(entry?.offers ?? []), ...(labId ? canonicalOffers.get(labId) ?? [] : [])]
+			.filter(({ reference }) => !labId || !reference.canonicalModelId || reference.canonicalModelId === labId);
+		const priority = ({ reference }: ReferenceOffer) => (maker && reference.providerId === maker ? 2 : 0) + (reference.modelId.toLowerCase() === key ? 1 : 0);
+		offers.sort((a, b) => priority(b) - priority(a));
+		for (const field of REFERENCE_FIELDS) {
+			if (field === "effortOptions" && info.reasoning === false) continue;
+			const offer = offers.find((row) => row[field] !== undefined);
+			if (!offer) continue;
+			if (field === "cost") info.cost = offer.cost;
+			else info.effortOptions = offer.effortOptions;
+			sources[field] = { source: "models.dev", match: "exact", infer: true, referenceModelId: offer.reference.modelId, references: [offer.reference] };
+		}
 
 		// The two limits can now come from different sources — keep them coherent.
 		if (info.contextWindow !== undefined && info.maxTokens !== undefined) {
-			info.maxTokens = normalizeModelLimits(info.contextWindow, info.maxTokens).maxTokens;
+			const output = normalizeModelLimits(info.contextWindow, info.maxTokens).maxTokens;
+			if (output !== info.maxTokens) sources.maxTokens = { source: "api-default", match: "default", infer: true, derivation: "limit-reconciliation", references: sources.maxTokens?.references };
+			info.maxTokens = output;
 		}
-		if (Object.keys(info).length > 0) index.set(key, info);
+		if (Object.keys(info).length > 0) index.set(key, withMetadataProvenance(info, sources));
 	}
 	idIndexCache = index;
 	return index;
@@ -600,10 +663,17 @@ export async function fetchModelsDevInfoByModelIds(ids: string[]): Promise<Map<s
 	for (const id of ids) {
 		for (const candidate of normalizeModelIdCandidates(id)) {
 			const info = index.get(candidate);
-			if (info) {
-				out.set(id, info);
-				break;
+			if (!info) continue;
+			const sources = getMetadataProvenance(info);
+			for (const field of METADATA_FIELDS) {
+				const source = sources[field];
+				if (source?.source !== "models.dev") continue;
+				const exact = candidate === id && source.references?.some((ref) => ref.modelId === id);
+				const aggregate = source.match === "aggregate" && !source.referenceModelId;
+				sources[field] = { ...source, candidate, infer: source.infer || !exact || aggregate, match: exact ? source.match : "normalized" };
 			}
+			out.set(id, withMetadataProvenance({ ...info }, sources));
+			break;
 		}
 	}
 	return out;
@@ -631,14 +701,46 @@ export async function fetchModelsDevInfoForBaseUrl(baseUrl: string, ids?: string
 	try {
 		const providerId = await providerIdForBaseUrl(baseUrl);
 		if (providerId) {
-			for (const [id, info] of await fetchModelsDevModels(providerId)) out.set(id, info);
+			const provider = await fetchModelsDevModels(providerId);
+			for (const [id, info] of provider) out.set(id, info);
+			for (const id of ids ?? []) {
+				if (out.has(id)) continue;
+				for (const candidate of normalizeModelIdCandidates(id)) {
+					const info = provider.get(candidate);
+					if (!info) continue;
+					const sources = getMetadataProvenance(info);
+					for (const field of METADATA_FIELDS) {
+						const source = sources[field];
+						if (source?.source === "models.dev") sources[field] = { ...source, candidate, match: "normalized", infer: true };
+					}
+					out.set(id, withMetadataProvenance({ ...info }, sources));
+					break;
+				}
+			}
 		}
 	} catch {
 		// catalog unreachable — try the id index alone below
 	}
 	if (ids && ids.length > 0) {
-		const byId = await fetchModelsDevInfoByModelIds(ids.filter((id) => !out.has(id)));
-		for (const [id, info] of byId) out.set(id, info);
+		const byId = await fetchModelsDevInfoByModelIds(ids.filter((id) => {
+			const info = out.get(id);
+			return !info?.cost || (info.reasoning !== false && !info.effortOptions?.length);
+		}));
+		for (const [id, info] of byId) {
+			const host = out.get(id);
+			if (!host) { out.set(id, info); continue; }
+			const merged = { ...host };
+			const sources = getMetadataProvenance(host), references = getMetadataProvenance(info);
+			if (!host.cost && info.cost) {
+				merged.cost = info.cost;
+				sources.cost = references.cost;
+			}
+			if (!host.effortOptions?.length && host.reasoning !== false && info.effortOptions?.length) {
+				merged.effortOptions = info.effortOptions;
+				sources.effortOptions = references.effortOptions;
+			}
+			out.set(id, withMetadataProvenance(merged, sources));
+		}
 	}
 	return out;
 }

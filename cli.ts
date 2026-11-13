@@ -180,7 +180,7 @@ if ("error" in parsed) {
 }
 
 async function run(options: Options, baseUrl: string): Promise<void> {
-	const { API_FALLBACK_LIMITS, describeProbeInfo, detectModels } = await import("./index.ts");
+	const { API_FALLBACK_LIMITS, describeProbeInfo, detectModels, getMetadataProvenance } = await import("./index.ts");
 
 	if (options.api !== undefined && !Object.hasOwn(API_FALLBACK_LIMITS, options.api)) {
 		console.error(
@@ -198,12 +198,17 @@ async function run(options: Options, baseUrl: string): Promise<void> {
 		});
 
 		if (options.json) {
+			const inferred = [...result.models].flatMap(([id, info]) => {
+				const fields = Object.entries(getMetadataProvenance(info)).filter(([, field]) => field.source === "models.dev" && field.infer);
+				return fields.length ? [[id, Object.fromEntries(fields)]] : [];
+			});
 			console.log(
 				JSON.stringify(
 					{
 						baseUrl: result.baseUrl,
 						ids: result.ids,
 						models: Object.fromEntries(result.models),
+						...(inferred.length ? { provenance: Object.fromEntries(inferred) } : {}),
 						...(options.developerRole
 							? { supportsDeveloperRole: result.supportsDeveloperRole ?? null, developerRoleSource: result.developerRoleSource ?? null }
 							: {}),

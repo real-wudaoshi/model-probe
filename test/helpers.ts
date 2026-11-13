@@ -204,7 +204,7 @@ export function snapshotModule(catalog: unknown, generatedAt = "2026-11-10T05:24
 	].join("\n");
 }
 
-type CatalogModel = { context: number; output: number; input?: string[]; reasoning?: boolean; cost?: Record<string, number>; canonical?: string };
+type CatalogModel = { context: number; output: number; input?: string[]; reasoning?: boolean; cost?: Record<string, number>; effort?: string[]; canonical?: string };
 
 function providerModel(id: string, model: CatalogModel): Record<string, unknown> {
 	return {
@@ -220,6 +220,7 @@ function providerModel(id: string, model: CatalogModel): Record<string, unknown>
 		modalities: { input: model.input ?? ["text"], output: ["text"] },
 		limit: { context: model.context, output: model.output },
 		...(model.cost ? { cost: model.cost } : {}),
+		...(model.effort ? { reasoning_options: [{ type: "effort", values: model.effort }] } : {}),
 		...(model.canonical ? { canonical_model_id: model.canonical } : {}),
 	};
 }

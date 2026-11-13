@@ -1,8 +1,9 @@
 import { authedRequest, bodySnippet, HttpError, parseJsonBody, request } from "./http.ts";
 import type { HttpFailureKind, HttpResult } from "./http.ts";
 import { PROBE_CONCURRENCY } from "./types.ts";
-import type { ModelCostInfo, ModelProbeInfo, ProbeResult } from "./types.ts";
+import type { MetadataField, ModelCostInfo, ModelProbeInfo, ProbeResult } from "./types.ts";
 import { buildProbeUrl, dedupe, firstFiniteNumber, isLocalHost, normalizeBaseUrl } from "./url.ts";
+import { getMetadataProvenance, getMetadataSourceLabel, withMetadataProvenance } from "./provenance.ts";
 
 const JSON_HEADERS: Record<string, string> = { accept: "application/json", "accept-encoding": "identity" };
 
@@ -328,7 +329,9 @@ export function applyModelDefaults(info: ModelProbeInfo | undefined): ModelProbe
 		defaulted.push("reasoning");
 	}
 	if (defaulted.length > 0) out.defaultedFields = defaulted;
-	return out;
+	const sources = getMetadataProvenance(info);
+	for (const field of ["image", "video", "reasoning"] as const) if (info?.[field] === undefined) sources[field] = { source: "default", match: "default", infer: true };
+	return withMetadataProvenance(out, sources);
 }
 
 // Human-readable list of the metadata fields actually present in a probe
@@ -360,11 +363,12 @@ function hasProbeInfo(info: ModelProbeInfo | undefined): boolean {
 
 export function describeProbeInfo(info: ModelProbeInfo | undefined): string | undefined {
 	if (!info) return undefined;
-	const inferred = new Set(info.inferredFields ?? []);
-	const fromModelsDev = new Set(info.modelsDevFields ?? []);
 	const defaulted = new Set(info.defaultedFields ?? []);
-	const tag = (field: "contextWindow" | "maxTokens" | "image" | "video" | "reasoning" | "cost") =>
-		inferred.has(field as any) ? " [local rules]" : fromModelsDev.has(field) ? " [models.dev]" : "";
+	const tag = (field: MetadataField) => {
+		if (info.inferredFields?.some((value) => value === field)) return " [local rules]";
+		const label = getMetadataSourceLabel(info, field);
+		return label === "gateway" || label === "default" ? "" : ` [${label}]`;
+	};
 	const parts: string[] = [];
 	// Limit fields filled by the api fallback (tagged defaulted) carry no real
 	// information about the model — don't show them.
@@ -378,6 +382,7 @@ export function describeProbeInfo(info: ModelProbeInfo | undefined): string | un
 	if (info.video === true) parts.push(`video${tag("video")}`);
 	if (info.reasoning === false) parts.push(`no reasoning${tag("reasoning")}`);
 	else if (info.reasoning === true && info.alwaysThinking) parts.push(`reasoning (always on)${tag("reasoning")}`);
+	if (info.reasoning !== false && info.effortOptions?.length) parts.push(`effort ${info.effortOptions.join("/")}${tag("effortOptions")}`);
 	if (info.cost) parts.push(`$${info.cost.input}/$${info.cost.output} per 1M${tag("cost")}`);
 	if (info.endpointTypes && info.endpointTypes.length > 0) parts.push(info.endpointTypes.join("/"));
 	return parts.length > 0 ? parts.join(" • ") : undefined;
@@ -663,6 +668,13 @@ function parseModelListItem(item: any): ModelProbeInfo | undefined {
 
 	parseLimits(item, info);
 	parseReasoning(item, info);
+	if (info.reasoning !== false && Array.isArray(item.effort?.supported_levels)) {
+		const levels = item.effort.supported_levels.filter((level: unknown): level is string => typeof level === "string" && level.trim() !== "");
+		if (levels.length) {
+			info.effortOptions = [...new Set<string>(levels)];
+			info.reasoning = true;
+		}
+	}
 	parseInputModalities(item, info);
 
 	// New API's /v1/models entries carry supported_endpoint_types

@@ -58,12 +58,12 @@ describe("resolveModelInfo", () => {
 		assert.deepEqual(entry, { maxTokens: 4096, image: true });
 	});
 
-	it("reads a context window spelled out in the id, ahead of the catalog", () => {
+	it("uses ID hints when neither the gateway nor an exact catalog entry supplies context", () => {
 		const catalog = new Map<string, Info>([["claude-opus-4-5[1m]", { contextWindow: 200000, maxTokens: 64000 }]]);
-		const info = resolveModelInfo("claude-opus-4-5[1m]", undefined, catalog);
+		assert.equal(resolveModelInfo("claude-opus-4-5[1m]", undefined, catalog).contextWindow, 200000);
+		const info = resolveModelInfo("claude-opus-4-5[1m]");
 		assert.equal(info.contextWindow, 1000000);
 		assert.ok(info.inferredFields?.includes("contextWindow"), "tagged as inferred, not as detected");
-		assert.equal(info.maxTokens, 64000);
 		assert.equal(resolveModelInfo("some-model[200k]").contextWindow, 200000);
 		// ...but not ahead of what the gateway itself reported.
 		assert.equal(resolveModelInfo("claude-opus-4-5[1m]", { contextWindow: 500000 }).contextWindow, 500000);

@@ -10,8 +10,8 @@
 //   5. default    — filled from MODEL_INFO_DEFAULTS (listed in defaultedFields)
 
 // USD per 1M tokens — pi's ModelCostRates convention (and models.dev's).
-// No local-rule or default source: a guessed price is worse than none, so
-// cost only ever comes from the gateway itself or the models.dev catalog.
+// Gateway or models.dev list prices. An ID match can supply a reference quote
+// from another provider, marked as inferred in the field provenance.
 export type ModelCostInfo = {
 	input: number;
 	output: number;
@@ -34,6 +34,23 @@ export type ModelProbeInfo = {
 	modelsDevFields?: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning" | "cost">; // which fields came from models.dev
 	defaultedFields?: Array<"contextWindow" | "maxTokens" | "image" | "video" | "reasoning">; // which fields came from the api fallback / MODEL_INFO_DEFAULTS
 };
+
+export type MetadataField = "contextWindow" | "maxTokens" | "image" | "video" | "reasoning" | "cost" | "alwaysThinking" | "effortOptions" | "endpointTypes";
+export type MetadataSource = "gateway" | "models.dev" | "rule" | "id-hint" | "api-default" | "default" | "saved" | "custom";
+export type MetadataReference = { modelId: string; providerId?: string; canonicalModelId?: string; derivedFields?: MetadataField[] };
+export type FieldProvenance = {
+	source: MetadataSource;
+	match: "exact" | "normalized" | "aggregate" | "rule" | "hint" | "default";
+	infer: boolean;
+	referenceModelId?: string;
+	references?: MetadataReference[];
+	candidate?: string;
+	rulePattern?: string;
+	ruleMatch?: string;
+	derivation?: "limit-reconciliation";
+};
+export type MetadataProvenance = Partial<Record<MetadataField, FieldProvenance>>;
+export type ResolvedModelMetadata = { id: string; info: ModelProbeInfo; provenance: MetadataProvenance };
 
 export type ProbeResult = {
 	/** Model ids discovered from /models, sorted. */
